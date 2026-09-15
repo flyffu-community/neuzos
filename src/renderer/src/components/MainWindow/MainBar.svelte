@@ -244,6 +244,24 @@
     }
   }
 
+  const canToggleLayoutFocus = () => {
+    if (mainWindowState.tabs.focusedLayoutSession) return true;
+
+    return mainWindowState.tabs.activeLayoutSession?.layoutId === mainWindowState.tabs.activeLayoutId;
+  }
+
+  const layoutFocusButtonTitle = () => {
+    if (mainWindowState.tabs.focusedLayoutSession) {
+      return 'Return to layout (F11)';
+    }
+
+    const selectedSessionId = mainWindowState.tabs.activeLayoutSession?.sessionId;
+    const selectedSession = mainWindowState.sessions.find((session) => session.id === selectedSessionId);
+    return selectedSession
+      ? `Focus ${selectedSession.label} (F11)`
+      : 'Select a layout session to focus';
+  }
+
   const stopSession = (sessionId: string) => {
     neuzosBridge.sessions.stop(sessionId)
   }
@@ -994,6 +1012,16 @@
   {/if}
 
   <Separator orientation="vertical" class="h-4"/>
+  <Button
+    size="icon-xs"
+    variant="outline"
+    disabled={!canToggleLayoutFocus()}
+    title={layoutFocusButtonTitle()}
+    onclick={() => neuzosBridge.mainWindow.layoutFocusToggle()}
+    class="cursor-pointer"
+  >
+    <Fullscreen class="size-3.5"/>
+  </Button>
   {#if mainWindowState.config.titleBarButtons.fullscreenToggle}
     <Button size="icon-xs" variant="outline" onclick={() => {
         neuzosBridge.mainWindow.fullscreenToggle()

@@ -18,6 +18,7 @@
   import {flyffRegistry} from '$lib/core';
   import {Button} from "$lib/components/ui/button";
   import {Minimize} from '@lucide/svelte';
+  import {shouldRevealLayoutFocusTitlebar, toggleLayoutFullscreen} from '$lib/layout-focus';
 
 
   import {cleanupActionPadStorage, cleanupActionPinsStorage, readSettingsLayoutAutoSave} from '$lib/localStorageStores';
@@ -32,6 +33,7 @@
 
   let isLoading = $state(true);
   let isFullscreen = $state(false);
+  let isLayoutFocusTitlebarVisible = $state(false);
 
   setElectronContext(window.electron.ipcRenderer);
   setNeuzosBridgeContext(neuzosBridge);
@@ -144,6 +146,8 @@
       visible: true,
       activeLayoutId: null,
       previousLayoutId: null,
+      activeLayoutSession: null,
+      focusedLayoutSession: null,
     },
     sessionsLayoutsRef: {},
     doCalculationUpdatesRng: 0
@@ -151,6 +155,14 @@
 
   const electronApi = window.electron.ipcRenderer;
   const cleanupListeners: Array<() => void> = []
+  const updateLayoutFocusTitlebarVisibility = (event: MouseEvent) => {
+    isLayoutFocusTitlebarVisible = shouldRevealLayoutFocusTitlebar(
+      Boolean(mainWindowState.tabs.focusedLayoutSession),
+      event.clientY,
+    )
+  }
+
+  addEventListener('mousemove', updateLayoutFocusTitlebarVisibility)
 
   const listen = (channel: string, listener: (...args: any[]) => void) => {
     electronApi.on(channel, listener)
@@ -159,6 +171,7 @@
 
   onDestroy(() => {
     cleanupListeners.forEach((cleanup) => cleanup())
+    removeEventListener('mousemove', updateLayoutFocusTitlebarVisibility)
   })
 
   listen('event.layout_add', (_, layoutId: string) => {
@@ -185,6 +198,7 @@
     console.log("layout_switch", layoutId)
     mainWindowState.tabs.previousLayoutId = mainWindowState.tabs.activeLayoutId
     mainWindowState.tabs.activeLayoutId = layoutId
+    mainWindowState.tabs.activeLayoutSession = null
   })
 
   const closeLayout = (layoutId: string, mirrorDefaultLayouts = false) => {
@@ -193,6 +207,9 @@
       mainWindowState.tabs.activeLayoutId = mainWindowState.tabs.previousLayoutId ?? null
     }
     mainWindowState.tabs.layoutOrder = mainWindowState.tabs.layoutOrder.filter(id => id !== layoutId)
+    if (mainWindowState.tabs.activeLayoutSession?.layoutId === layoutId) {
+      mainWindowState.tabs.activeLayoutSession = null
+    }
 
     if (mirrorDefaultLayouts && readSettingsLayoutAutoSave() && mainWindowState.config.defaultLayouts.includes(layoutId)) {
       mainWindowState.config.defaultLayouts = mainWindowState.config.defaultLayouts.filter((defaultLayoutId) => defaultLayoutId !== layoutId)
@@ -204,6 +221,7 @@
   listen('event.layout_close_all', (_) => {
     mainWindowState.tabs.previousLayoutId = null
     mainWindowState.tabs.activeLayoutId = 'home'
+    mainWindowState.tabs.activeLayoutSession = null
     mainWindowState.tabs.layoutsIds.forEach(layoutId => {
       closeLayout(layoutId)
     })
@@ -223,6 +241,7 @@
       const newLayoutId = previousLayoutId
       mainWindowState.tabs.previousLayoutId = activeLayoutId
       mainWindowState.tabs.activeLayoutId = newLayoutId
+      mainWindowState.tabs.activeLayoutSession = null
     }
   })
 
@@ -241,6 +260,7 @@
 
     mainWindowState.tabs.previousLayoutId = activeLayoutId
     mainWindowState.tabs.activeLayoutId = nextLayoutId
+    mainWindowState.tabs.activeLayoutSession = null
   }
 
   listen('event.layout_cycle_forward', (_) => {
@@ -536,6 +556,18 @@
   // Listen for fullscreen state changes
   listen('event.fullscreen_changed', (_, fullscreen: boolean) => {
     isFullscreen = fullscreen
+    if (!fullscreen) {
+      mainWindowState.tabs.focusedLayoutSession = null
+    }
+  })
+
+  listen('event.layout_focus_toggle', () => {
+    mainWindowState.tabs.focusedLayoutSession = toggleLayoutFullscreen(
+      mainWindowState.tabs.focusedLayoutSession,
+      mainWindowState.tabs.activeLayoutSession,
+      mainWindowState.tabs.activeLayoutId,
+      neuzosBridge.mainWindow.fullscreenToggle
+    )
   })
 
   setContext('mainWindowState', mainWindowState)
@@ -670,8 +702,14 @@
 {:else}
   <SharedEvents/>
   <div class="w-full h-full flex flex-col border-2 relative">
-    {#if !isFullscreen || !mainWindowState.config.fullscreen?.hideTitleBarInMainWindow}
-      <MainBar/>
+    {#if !isFullscreen || !mainWindowState.config.fullscreen?.hideTitleBarInMainWindow || mainWindowState.tabs.focusedLayoutSession}
+      <div
+        class="relative z-[101] shrink-0 transition-transform duration-150 ease-out {mainWindowState.tabs.focusedLayoutSession && !isLayoutFocusTitlebarVisible
+          ? '-translate-y-full'
+          : 'translate-y-0'}"
+      >
+        <MainBar/>
+      </div>
     {/if}
     <MainSectionsContainer/>
 

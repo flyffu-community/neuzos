@@ -24,11 +24,20 @@
                   {@const runtimeSession = mainWindowState.sessions.find((s) => s.id === sessionId)}
                   {@const session = mainWindowState.config.sessions.find((s) => s.id === sessionId) ?? runtimeSession}
                   {#if session}
+                    {@const isLayoutFocused = mainWindowState.tabs.focusedLayoutSession?.layoutId === layout.id
+                      && mainWindowState.tabs.focusedLayoutSession?.sessionId === session.id}
                     <Resizable.Pane>
                       <NeuzClient
                         layoutId={layout.id}
                         autofocusEnabled={layout.autoFocus ?? true}
                         session={session}
+                        {isLayoutFocused}
+                        onActivate={(sessionId) => {
+                          mainWindowState.tabs.activeLayoutSession = {
+                            layoutId: layout.id,
+                            sessionId,
+                          }
+                        }}
                         onUpdate={(_) => {
 
                             }}

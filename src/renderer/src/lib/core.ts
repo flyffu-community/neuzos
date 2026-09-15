@@ -54,6 +54,9 @@ export const neuzosBridge = {
     fullscreenToggle: () => {
       electronApi?.send("main_window.fullscreen_toggle");
     },
+    layoutFocusToggle: () => {
+      electronApi?.send("main_window.layout_focus_toggle");
+    },
     toggleShortcuts: (enabled: boolean) => {
       electronApi?.send("main_window.toggle_shortcuts", enabled);
     }

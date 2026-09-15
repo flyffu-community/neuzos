@@ -1685,7 +1685,7 @@ function dispatchKeybindEvent(bind: any) {
 
   switch (bind.event) {
     case "fullscreen_toggle":
-      mainWindow?.setFullScreen(!mainWindow?.isFullScreen());
+      mainWindow?.webContents.send("event.layout_focus_toggle");
       break;
     case "close_focus_session":
       closeFocusSessionWindow();
@@ -2092,6 +2092,10 @@ function registerSessionKeybinds(mode: LaunchMode) {
       const newFullscreenState = !mainWindow?.isFullScreen();
       mainWindow?.setFullScreen(newFullscreenState);
       // Event will be sent by enter-full-screen/leave-full-screen handlers
+    })
+
+    ipcMain.on("main_window.layout_focus_toggle", () => {
+      mainWindow?.webContents.send("event.layout_focus_toggle");
     })
 
     ipcMain.on("main_window.minimize", () => {

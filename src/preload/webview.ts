@@ -21,6 +21,11 @@ function suppressMouseBindDefault(event: MouseEvent): void {
 }
 
 document.addEventListener('mousedown', (event) => {
+  if (event.button === 0) {
+    ipcRenderer.sendToHost('sessionfocus');
+    return;
+  }
+
   const key = mouseBindButtonMap[event.button];
   if (!key) return;
 

@@ -5,16 +5,19 @@
   import type {WebviewTag} from 'electron'
   import Button from '../../lib/components/ui/button/button.svelte'
   import {neuzosBridge} from "$lib/core";
+  import {handleLayoutFocusInput} from '$lib/layout-focus';
 
   const webviewPreloadPath: string = (window as any)._preloadPaths?.webview ?? '';
 
-  let {session, onUpdate, autofocusEnabled = $bindable(), layoutId, src, userAgent}: {
+  let {session, onUpdate, autofocusEnabled = $bindable(), layoutId, src, userAgent, isLayoutFocused = false, onActivate}: {
     session: NeuzSession
     layoutId: string
     onUpdate: (sessionId: string) => void
     autofocusEnabled: boolean
     src: string
     userAgent?: string
+    isLayoutFocused?: boolean
+    onActivate?: (sessionId: string) => void
   } = $props()
 
   let partition: string = $state('')
@@ -341,6 +344,11 @@ window.open = function(...args) {
     const onIpcMessage = (event: Event) => {
       const e = event as any
       const key: string = e.args?.[0]
+
+      if (handleLayoutFocusInput(e.channel, () => onActivate?.(session.id))) {
+        return
+      }
+
       if (!key) return
 
       if (e.channel === 'keydown') {
@@ -417,9 +425,10 @@ window.open = function(...args) {
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
-  class="w-full h-full relative group"
+  class="w-full h-full relative group {isLayoutFocused ? 'layout-focused-client' : ''}"
   data-session-id={session.id}
   onmouseenter={() => {
+    onActivate?.(session.id)
     focus()
   }}
 >
@@ -479,3 +488,12 @@ window.open = function(...args) {
     {/if}
   {/if}
 </div>
+
+<style>
+  .layout-focused-client {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    background: var(--background);
+  }
+</style>

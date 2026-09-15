@@ -66,6 +66,14 @@ export type MainWindowState = {
     visible: boolean
     activeLayoutId: string | null
     previousLayoutId: string | null
+    activeLayoutSession: {
+      layoutId: string
+      sessionId: string
+    } | null
+    focusedLayoutSession: {
+      layoutId: string
+      sessionId: string
+    } | null
   }
   doCalculationUpdatesRng: number
   sessionsLayoutsRef: {
