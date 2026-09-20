@@ -4,6 +4,7 @@
   import {getContext} from 'svelte';
   import type {MainWindowState, SessionAction} from '$lib/types';
   import {getCooldownsContext} from '$lib/contexts/cooldownsContext';
+  import {getNeuzosBridgeContext} from '$lib/contexts/neuzosBridgeContext';
   import {
     readActionPadBackgroundTransparency,
     readActionPadRows,
@@ -33,6 +34,7 @@
 
   const mainWindowState = getContext<MainWindowState>('mainWindowState');
   const cooldownsContext = getCooldownsContext();
+  const neuzosBridge = getNeuzosBridgeContext();
 
   // Force reactivity for cooldown updates
   let cooldownTrigger = $state(0);
@@ -512,19 +514,8 @@
   }
 
   function sendActionKey(action: SessionAction) {
-    if (!sessionId) return;
-
-    // Send the action key to all neuz clients for this session across all layouts
-    const sessionLayouts = mainWindowState.sessionsLayoutsRef[sessionId]?.layouts;
-    if (sessionLayouts) {
-      Object.keys(sessionLayouts).forEach(layoutId => {
-        const neuzClient = sessionLayouts[layoutId] as any;
-        if (neuzClient && neuzClient.sendKey && action.ingameKey) {
-          console.log('Sending key', action.ingameKey, 'to session', sessionId, 'in layout', layoutId);
-          neuzClient.sendKey(action.ingameKey);
-        }
-      });
-    }
+    if (!sessionId || !action.ingameKey) return;
+    neuzosBridge.sessions.sendKey(sessionId, action.ingameKey);
   }
 
 

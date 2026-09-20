@@ -1,0 +1,111 @@
+@property --indicator-effect-angle {
+  syntax: '<angle>';
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes indicator-effect-spin {
+  to {
+    --indicator-effect-angle: 360deg;
+  }
+}
+
+@keyframes indicator-effect-breathe {
+  0%, 100% {
+    opacity: var(--indicator-effect-min-opacity, 0.35);
+    filter: drop-shadow(0 0 3px color-mix(in oklab, var(--indicator-effect-color, var(--foreground)) 30%, transparent));
+  }
+  50% {
+    opacity: var(--indicator-effect-max-opacity, 1);
+    filter: drop-shadow(0 0 8px color-mix(in oklab, var(--indicator-effect-color, var(--foreground)) 70%, transparent));
+  }
+}
+
+.indicator-effect {
+  position: relative;
+  isolation: isolate;
+  outline: var(--indicator-effect-outline-width, 2px) solid
+    color-mix(in oklab, var(--indicator-effect-color, var(--foreground)) 50%, transparent);
+  outline-offset: var(--indicator-effect-outline-offset, 1px);
+}
+
+.indicator-effect--layout {
+  --indicator-effect-min-opacity: 0.3;
+  --indicator-effect-max-opacity: 0.85;
+  outline-color: color-mix(in oklab, var(--indicator-effect-color, var(--foreground)) 40%, transparent);
+}
+
+.indicator-effect--1::after,
+.indicator-effect--2::after,
+.indicator-effect--3::after {
+  content: '';
+  position: absolute;
+  inset: var(--indicator-effect-inset, -4px);
+  border-radius: inherit;
+  padding: var(--indicator-effect-width, 2px);
+  pointer-events: none;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+
+.indicator-effect--1::after {
+  background: conic-gradient(
+    from var(--indicator-effect-angle),
+    transparent 0deg 195deg,
+    color-mix(in oklab, var(--indicator-effect-color, var(--foreground)) 16%, transparent) 220deg,
+    color-mix(in oklab, var(--indicator-effect-color, var(--foreground)) 72%, transparent) 270deg,
+    var(--indicator-effect-color, var(--foreground)) 305deg,
+    color-mix(in oklab, var(--indicator-effect-color, var(--foreground)) 28%, transparent) 340deg,
+    transparent 360deg
+  );
+  filter: drop-shadow(0 0 5px color-mix(in oklab, var(--indicator-effect-color, var(--foreground)) 58%, transparent));
+  animation: indicator-effect-spin var(--indicator-effect-duration, 2.6s) linear infinite;
+}
+
+.indicator-effect--2::after {
+  background: conic-gradient(
+    from var(--indicator-effect-angle),
+    transparent 0deg 28deg,
+    color-mix(in oklab, var(--indicator-effect-color, var(--foreground)) 28%, transparent) 48deg,
+    var(--indicator-effect-color, var(--foreground)) 82deg,
+    color-mix(in oklab, var(--indicator-effect-color, var(--foreground)) 28%, transparent) 116deg,
+    transparent 136deg 208deg,
+    color-mix(in oklab, var(--indicator-effect-color, var(--foreground)) 28%, transparent) 228deg,
+    var(--indicator-effect-color, var(--foreground)) 262deg,
+    color-mix(in oklab, var(--indicator-effect-color, var(--foreground)) 28%, transparent) 296deg,
+    transparent 316deg 360deg
+  );
+  filter: drop-shadow(0 0 5px color-mix(in oklab, var(--indicator-effect-color, var(--foreground)) 52%, transparent));
+  animation: indicator-effect-spin var(--indicator-effect-duration, 3.1s) linear infinite;
+}
+
+.indicator-effect--3::after {
+  background: var(--indicator-effect-color, var(--foreground));
+  animation: indicator-effect-breathe var(--indicator-effect-duration, 2.3s) ease-in-out infinite;
+}
+
+.indicator-effect--layout.indicator-effect--1::after,
+.indicator-effect--layout.indicator-effect--2::after {
+  opacity: 0.85;
+}
+
+.indicator-effect--static {
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--indicator-effect-color, var(--foreground)) 48%, transparent),
+    0 0 9px color-mix(in oklab, var(--indicator-effect-color, var(--foreground)) 30%, transparent);
+}
+
+.indicator-effect--layout.indicator-effect--static {
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--indicator-effect-color, var(--foreground)) 40%, transparent),
+    0 0 8px color-mix(in oklab, var(--indicator-effect-color, var(--foreground)) 24%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .indicator-effect--1::after,
+  .indicator-effect--2::after,
+  .indicator-effect--3::after {
+    animation: none;
+  }
+}

@@ -30,6 +30,7 @@
   import {Button} from "$lib/components/ui/button";
   import {Switch} from "$lib/components/ui/switch";
   import {neuzosBridge} from "$lib/core";
+  import {extendedLayoutIconGroups} from "$lib/data/layoutIcons";
   import {readSettingsCollapsedGroups, readSettingsSortMode, writeSettingsCollapsedGroups, writeSettingsSortMode} from "$lib/localStorageStores";
   import {toast} from 'svelte-sonner'
 
@@ -83,19 +84,6 @@
         {slug: 'jobs/templar', label: 'Templar'},
         {slug: 'jobs/arcanist', label: 'Arcanist'},
         {slug: 'jobs/mentalist', label: 'Mentalist'}
-      ]
-    },
-    {
-      heading: 'Other Icons',
-      icons: [
-        {slug: 'neuzos_pang', label: 'NeuzOS'},
-        {slug: 'misc/browser', label: 'Browser'},
-        {slug: 'misc/star', label: 'Star'},
-        {slug: 'misc/fwc', label: 'FWC'},
-        {slug: 'misc/item', label: 'Item'},
-        {slug: 'misc/bag', label: 'Bag'},
-        {slug: 'misc/battlepass', label: 'Battle Pass'},
-        {slug: 'misc/egg', label: 'Egg'}
       ]
     }
   ]
@@ -663,6 +651,7 @@
   // Track icon popover state for each session
   let iconPopoverStates: { [sessionId: string]: boolean } = $state({});
   let sessionIconViewMode: 'grid' | 'list' = $state('grid');
+  let showAllSessionIcons = $state(false);
   let groupPopoverStates: { [sessionId: string]: boolean } = $state({});
   let zoomPopoverStates: { [sessionId: string]: boolean } = $state({});
 </script>
@@ -756,14 +745,14 @@
               </div>
               <Command.Empty>No Icon found.</Command.Empty>
               <Command.List class="max-h-[min(20rem,calc(100vh-8rem))]">
-                {#each sessionIconGroups as group (group.heading)}
+                {#each showAllSessionIcons ? [...sessionIconGroups, ...extendedLayoutIconGroups] : sessionIconGroups as group (group.heading)}
                   <Command.Group heading={group.heading}>
                     {#if sessionIconViewMode === 'grid'}
                       <div class="grid grid-cols-[repeat(4,2.25rem)] justify-start gap-2 px-2 pb-2">
                         {#each group.icons as icon (icon.slug)}
                           <Command.Item
                             value={icon.slug}
-                            keywords={[icon.label.toLowerCase(), icon.slug.replace('jobs/', '').replace('misc/', '').replace(/_/g, ' ').toLowerCase()]}
+                            keywords={[icon.label.toLowerCase(), icon.slug.replace('jobs/', '').replace('misc/', '').replace('levels/', '').replace('pets/', '').replace(/_/g, ' ').toLowerCase()]}
                             onSelect={() => {
                               session.icon.slug = icon.slug;
                               iconPopoverStates[session.id] = false;
@@ -779,7 +768,7 @@
                       {#each group.icons as icon (icon.slug)}
                         <Command.Item
                           value={icon.slug}
-                          keywords={[icon.label.toLowerCase(), icon.slug.replace('jobs/', '').replace('misc/', '').replace(/_/g, ' ').toLowerCase()]}
+                          keywords={[icon.label.toLowerCase(), icon.slug.replace('jobs/', '').replace('misc/', '').replace('levels/', '').replace('pets/', '').replace(/_/g, ' ').toLowerCase()]}
                             onSelect={() => {
                               session.icon.slug = icon.slug;
                               iconPopoverStates[session.id] = false;
@@ -793,6 +782,21 @@
                     {/if}
                   </Command.Group>
                 {/each}
+                {#if !showAllSessionIcons}
+                  <div class="border-t p-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      class="w-full"
+                      onclick={() => {
+                        showAllSessionIcons = true;
+                      }}
+                    >
+                      Show All Icons
+                    </Button>
+                  </div>
+                {/if}
               </Command.List>
             </Command.Root>
           </Popover.Content>

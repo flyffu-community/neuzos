@@ -1,12 +1,17 @@
 <script lang="ts">
   import {getContext, onMount} from 'svelte';
   import {Swords} from '@lucide/svelte';
-  import {Separator} from '$lib/components/ui/separator';
   import {Button} from '$lib/components/ui/button';
   import type {MainWindowState} from '$lib/types';
   import {getCooldownsContext} from '$lib/contexts/cooldownsContext';
   import {getWidgetsContext} from '$lib/contexts/widgetsContext.svelte.js';
-  import {readActionPinsAutoLoadLatest, readActionPinsLatestPins, writeActionPinsLatestPins} from '$lib/localStorageStores';
+  import {getNeuzosBridgeContext} from '$lib/contexts/neuzosBridgeContext';
+  import {
+    ACTION_PINS_VISIBILITY_CHANGED_EVENT,
+    readActionPinsLatestPins,
+    readActionPinsVisible,
+    writeActionPinsLatestPins
+  } from '$lib/localStorageStores';
 
   type Props = {
     onHasPinnedActionsChange?: (hasPinnedActions: boolean) => void;
@@ -17,11 +22,14 @@
   const mainWindowState = getContext<MainWindowState>('mainWindowState');
   const cooldownsContext = getCooldownsContext();
   const widgetsContext = getWidgetsContext();
+  const neuzosBridge = getNeuzosBridgeContext();
 
   const ACTION_PIN_WIDGET_TYPE = 'widget.builtin.action_pin';
+  const ACTION_PAD_WIDGET_TYPE = 'widget.builtin.action_pad';
 
-  let didInitPinPersistence = false;
+  let didInitPinPersistence = $state(false);
   let initialSavedLatestPinSessionIds: string[] = [];
+  let showActionPins = $state(true);
 
   // Force reactivity for cooldown updates
   let cooldownTrigger = $state(0);
@@ -47,16 +55,25 @@
     return `${action.label} | Key: ${key} | Casttime: ${action.castTime}s | Cooldown: ${action.cooldown}s`;
   }
 
+  function openActionPad(sessionId: string) {
+    const existingActionPad = widgetsContext
+      .getWidgetsByType(ACTION_PAD_WIDGET_TYPE)
+      .find(widget => widget.data?.sessionId === sessionId);
+
+    if (existingActionPad) {
+      widgetsContext.showWidget(existingActionPad.id);
+      return;
+    }
+
+    widgetsContext.createWidget(ACTION_PAD_WIDGET_TYPE, {sessionId});
+  }
+
   function getSessionsWithActions(): string[] {
     return (
       mainWindowState.config.sessionActions
         ?.filter(sa => Array.isArray(sa.actions) && sa.actions.length > 0)
         .map(sa => sa.sessionId) ?? []
     );
-  }
-
-  function readAutoLoadLatestPins(): boolean {
-    return readActionPinsAutoLoadLatest();
   }
 
   function readSavedLatestPinSessionIds(): string[] {
@@ -74,15 +91,22 @@
   const validSessionIdsWithActions = $derived(getSessionsWithActions());
 
   onMount(() => {
+    const refreshActionPinsVisibility = () => {
+      showActionPins = readActionPinsVisible();
+    };
     const unsubscribe = cooldownsContext.subscribe(() => {
       cooldownTrigger++;
     });
+
+    refreshActionPinsVisibility();
+    window.addEventListener(ACTION_PINS_VISIBILITY_CHANGED_EVENT, refreshActionPinsVisibility);
+    window.addEventListener('storage', refreshActionPinsVisibility);
 
     initialSavedLatestPinSessionIds = readSavedLatestPinSessionIds();
     didInitPinPersistence = true;
 
     const validSessionIds = new Set(validSessionIdsWithActions);
-    if (validSessionIds.size > 0 && readAutoLoadLatestPins()) {
+    if (validSessionIds.size > 0) {
       const existingPinnedSessionIds = new Set(
         actionPinWidgets
           .map(widget => widget.data?.sessionId)
@@ -99,6 +123,8 @@
 
     return () => {
       unsubscribe();
+      window.removeEventListener(ACTION_PINS_VISIBILITY_CHANGED_EVENT, refreshActionPinsVisibility);
+      window.removeEventListener('storage', refreshActionPinsVisibility);
     };
   });
 
@@ -119,6 +145,8 @@
 
   // Get all pinned actions from sessions that have action pad widgets (even if hidden)
   const pinnedActionsToShow = $derived.by(() => {
+    if (!showActionPins) return [];
+
     const actionPadWidgets = actionPinWidgets;
 
     const result: Array<{
@@ -133,14 +161,12 @@
 
       if (sessionActions) {
         const pinnedActions = sessionActions.actions.filter(a => a.pinned);
-        if (pinnedActions.length > 0) {
-          const session = mainWindowState.config.sessions.find(s => s.id === sessionId);
-          result.push({
-            sessionId,
-            sessionLabel: session?.label || 'Unknown',
-            actions: pinnedActions
-          });
-        }
+        const session = mainWindowState.config.sessions.find(s => s.id === sessionId);
+        result.push({
+          sessionId,
+          sessionLabel: session?.label || 'Unknown',
+          actions: pinnedActions
+        });
       }
     });
 
@@ -226,17 +252,8 @@
   }
 
   function sendActionKeyToSession(sessionId: string, action: any) {
-    // Send the action key to all neuz clients for this session across all layouts
-    const sessionLayouts = mainWindowState.sessionsLayoutsRef[sessionId]?.layouts;
-    if (sessionLayouts) {
-      Object.keys(sessionLayouts).forEach(layoutId => {
-        const neuzClient = sessionLayouts[layoutId] as any;
-        if (neuzClient && neuzClient.sendKey && action.ingameKey) {
-          console.log("Sending key", action.ingameKey, "to session", sessionId, "in layout", layoutId);
-          neuzClient.sendKey(action.ingameKey);
-        }
-      });
-    }
+    if (!action.ingameKey) return;
+    neuzosBridge.sessions.sendKey(sessionId, action.ingameKey);
   }
 </script>
 
@@ -252,19 +269,28 @@
 
 {#each pinnedActionsToShow as sessionPinned, sessionIndex (sessionPinned.sessionId)}
   {#if sessionIndex > 0}
-    <Separator orientation="vertical" class="h-4"/>
+    <div aria-hidden="true" class="h-7 w-px shrink-0 bg-border"></div>
   {/if}
   {#snippet sessionGroup()}
     {@const session = mainWindowState.config.sessions.find(s => s.id === sessionPinned.sessionId)}
     <div class="flex items-center gap-1 px-1.5 rounded-md bg-accent/30">
       {#if session}
-        <div class="relative size-5 p-0 flex items-center justify-center" title="{sessionPinned.sessionLabel}">
+        <button
+          type="button"
+          class="relative flex size-5 cursor-default items-center justify-center rounded p-0 transition-shadow hover:border-primary/70 hover:ring-1 hover:ring-primary/50 hover:shadow-sm hover:shadow-primary/10"
+          title={sessionPinned.sessionLabel}
+          ondblclick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            openActionPad(sessionPinned.sessionId);
+          }}
+        >
           <img
             src="icons/{session.icon.slug}.png"
             alt={sessionPinned.sessionLabel}
             class="h-full w-full object-contain"
           />
-        </div>
+        </button>
       {/if}
       {#each sessionPinned.actions as action (action.id)}
       {@const state = getActionStateReactive(sessionPinned.sessionId, action.id)}

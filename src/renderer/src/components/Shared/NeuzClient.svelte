@@ -5,22 +5,37 @@
   import type {WebviewTag} from 'electron'
   import Button from '../../lib/components/ui/button/button.svelte'
   import {neuzosBridge} from "$lib/core";
+  import {handleLayoutFocusInput} from '$lib/layout-focus';
 
   const webviewPreloadPath: string = (window as any)._preloadPaths?.webview ?? '';
 
-  let {session, onUpdate, autofocusEnabled = $bindable(), layoutId, src, userAgent}: {
+  let {
+    session,
+    onUpdate,
+    onWebviewReady,
+    autofocusEnabled = $bindable(),
+    layoutId,
+    src,
+    userAgent,
+    isLayoutFocused = false,
+    onActivate
+  }: {
     session: NeuzSession
     layoutId: string
     onUpdate: (sessionId: string) => void
+    onWebviewReady?: () => void
     autofocusEnabled: boolean
     src: string
     userAgent?: string
+    isLayoutFocused?: boolean
+    onActivate?: (sessionId: string) => void
   } = $props()
 
   let partition: string = $state('')
   let started: boolean = $state(false)
   let webview: WebviewTag | HTMLElement = $state()
   let webviewReady: boolean = $state(false)
+  let hoverFocusRequestPending = false
   const mainWindowState = getContext<MainWindowState>('mainWindowState')
 
   const isPersistedMuted = () => {
@@ -341,6 +356,27 @@ window.open = function(...args) {
     const onIpcMessage = (event: Event) => {
       const e = event as any
       const key: string = e.args?.[0]
+
+      if (e.channel === 'sessionhover') {
+        if (mainWindowState.config.globalAutoFocus !== false && !hoverFocusRequestPending) {
+          hoverFocusRequestPending = true
+          void window.electron.ipcRenderer.invoke('window.focus_on_hover')
+            .then((focused) => {
+              if (!focused) return
+              onActivate?.(session.id)
+              focus()
+            })
+            .finally(() => {
+              hoverFocusRequestPending = false
+            })
+        }
+        return
+      }
+
+      if (handleLayoutFocusInput(e.channel, () => onActivate?.(session.id))) {
+        return
+      }
+
       if (!key) return
 
       if (e.channel === 'keydown') {
@@ -383,8 +419,12 @@ window.open = function(...args) {
     // so we use it only for re-applying zoom, not for clearing health.
     const onDidNavigate = () => clearSessionHealth()
     const applyZoomWhenReady = () => {
+      const becameReady = !webviewReady
       webviewReady = true
       initZoom(webviewEl, 0)
+      if (becameReady) {
+        onWebviewReady?.()
+      }
     }
     const onDidFinishLoad = () => applyZoomWhenReady()
     const onDomReady = () => applyZoomWhenReady()
@@ -417,9 +457,10 @@ window.open = function(...args) {
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
-  class="w-full h-full relative group"
+  class="w-full h-full relative group {isLayoutFocused ? 'layout-focused-client' : ''}"
   data-session-id={session.id}
   onmouseenter={() => {
+    onActivate?.(session.id)
     focus()
   }}
 >
@@ -479,3 +520,12 @@ window.open = function(...args) {
     {/if}
   {/if}
 </div>
+
+<style>
+  .layout-focused-client {
+    position: fixed;
+    inset: 0;
+    z-index: 100;
+    background: var(--background);
+  }
+</style>

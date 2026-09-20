@@ -48,7 +48,7 @@
     "num0", "num1", "num2", "num3", "num4", "num5", "num6", "num7", "num8", "num9",
     "numdec", "numadd", "numsub", "nummult", "numdiv",
     "printscreen", "pause",
-    ")", "!", "@", "#", "$", "%", "^", "&", "*", "(", ":", ";", ":", "=", "<", ",", "_", "plus", "-", ">", ".", "?", "/", "~", "`", "\u00b4", "\u00df", "{", "]", "[", "|", "\\", "}",
+    ")", "!", "@", "#", "$", "%", "^", "&", "*", "(", ":", ";", "'", ":", "=", "<", ",", "_", "plus", "-", ">", ".", "?", "/", "~", "`", "\u00b4", "\u00df", "{", "]", "[", "|", "\\", "}",
   ];
   const mouseButtonKeys = ["Middle", "Mouse4", "Mouse5"];
 
@@ -59,6 +59,7 @@
   const systemActionEventIds = [
     'ui.toggle_quest_log',
     'fullscreen_toggle',
+    'session_fullscreen_toggle',
     'close_focus_session',
     'toggle_keybinds',
     'layout_swap',
@@ -83,7 +84,7 @@
       };
     }
 
-    if (event === 'fullscreen_toggle' || event === 'close_focus_session') {
+    if (event === 'fullscreen_toggle' || event === 'session_fullscreen_toggle' || event === 'close_focus_session') {
       return {
         label: allowedEventKeybinds[event]?.label ?? event,
         category: 'Window'
@@ -105,7 +106,7 @@
       return 'Layout';
     }
 
-    if (event === 'fullscreen_toggle' || event === 'close_focus_session') {
+    if (event === 'fullscreen_toggle' || event === 'session_fullscreen_toggle' || event === 'close_focus_session') {
       return 'Window';
     }
 
@@ -122,8 +123,10 @@
         return 'Show / Hide the Quest Log Panel.';
       case 'fullscreen_toggle':
         return 'Toggles Fullscreen Mode.';
+      case 'session_fullscreen_toggle':
+        return 'Toggles Session Fullscreen Mode.';
       case 'close_focus_session':
-        return 'Closes the active Focus Session Window.';
+        return 'Closes the Active Focus Session Window.';
       case 'toggle_keybinds':
         return 'Enable or Disable NeuzOS Keybinds.\nThis Keybind is executable even if Keybinds are Disabled!';
       case 'layout_swap':

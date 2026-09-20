@@ -18,7 +18,7 @@ export const exportCategories: CategoryDefinition[] = [
   {
     id: 'general-settings',
     label: 'General Settings',
-    description: 'Autosave, Cache Cleanup, Window Settings, Title Bar Buttons, Fullscreen Behavior.',
+    description: 'Autosave, Cache Cleanup, Global Auto-Focus, Window Settings, Main Bar Buttons, Fullscreen Behavior.',
     enabled: true,
   },
   {
@@ -54,7 +54,7 @@ export const exportCategories: CategoryDefinition[] = [
 ];
 
 export const categoryConfigFields: Record<ExportCategory, string[]> = {
-  'general-settings': ['autoSaveSettings', 'autoDeleteAllCachesOnStartup', 'window', 'titleBarButtons', 'fullscreen'],
+  'general-settings': ['autoSaveSettings', 'autoDeleteAllCachesOnStartup', 'globalAutoFocus', 'window', 'titleBarButtons', 'fullscreen'],
   sessions: ['sessions', 'sessionGroups'],
   layouts: ['layouts', 'defaultLayouts'],
   keybinds: ['keyBinds', 'keyBindProfiles', 'activeKeyBindProfileId'],
@@ -103,7 +103,7 @@ function inferPayloadCategories(payload: Partial<ConfigImportPayload>): ExportCa
   if (Array.isArray((payload as ConfigExportPayloadV2).sessionActions)) {
     categories.push('session-actions');
   }
-  if ((payload as ConfigExportPayloadV2).window !== undefined || (payload as ConfigExportPayloadV2).autoSaveSettings !== undefined || (payload as ConfigExportPayloadV2).autoDeleteAllCachesOnStartup !== undefined || (payload as ConfigExportPayloadV2).titleBarButtons !== undefined || (payload as ConfigExportPayloadV2).fullscreen !== undefined) {
+  if ((payload as ConfigExportPayloadV2).window !== undefined || (payload as ConfigExportPayloadV2).autoSaveSettings !== undefined || (payload as ConfigExportPayloadV2).autoDeleteAllCachesOnStartup !== undefined || (payload as ConfigExportPayloadV2).globalAutoFocus !== undefined || (payload as ConfigExportPayloadV2).titleBarButtons !== undefined || (payload as ConfigExportPayloadV2).fullscreen !== undefined) {
     categories.push('general-settings');
   }
   if (Array.isArray((payload as ConfigExportPayloadV2).sessions) || Array.isArray((payload as ConfigExportPayloadV2).sessionGroups)) {
@@ -289,6 +289,7 @@ function cloneForExport(config: NeuzConfig, selectedCategories: ExportCategory[]
     }
     payload.autoSaveSettings = config.autoSaveSettings;
     payload.autoDeleteAllCachesOnStartup = config.autoDeleteAllCachesOnStartup;
+    payload.globalAutoFocus = config.globalAutoFocus ?? true;
     payload.titleBarButtons = cloneValue(config.titleBarButtons);
     if (config.fullscreen !== undefined) {
       payload.fullscreen = cloneValue(config.fullscreen);
@@ -456,7 +457,7 @@ function getObjectPreviewCounts(payload: ConfigImportPayload, category: 'general
   }
 
   return {
-    totalCount: ['autoSaveSettings', 'autoDeleteAllCachesOnStartup', 'window', 'titleBarButtons', 'fullscreen']
+    totalCount: ['autoSaveSettings', 'autoDeleteAllCachesOnStartup', 'globalAutoFocus', 'window', 'titleBarButtons', 'fullscreen']
       .filter((field) => settingsPayload[field as keyof ConfigExportPayloadV2] !== undefined)
       .length,
   };

@@ -18,6 +18,8 @@
   import {flyffRegistry} from '$lib/core';
   import {Button} from "$lib/components/ui/button";
   import {Minimize} from '@lucide/svelte';
+  import {shouldRevealLayoutFocusTitlebar, toggleLayoutFullscreen} from '$lib/layout-focus';
+  import {isSingleSessionLayoutOpenInSessionWindow} from '$lib/layoutAvailability';
 
 
   import {cleanupActionPadStorage, cleanupActionPinsStorage, readSettingsLayoutAutoSave} from '$lib/localStorageStores';
@@ -32,6 +34,7 @@
 
   let isLoading = $state(true);
   let isFullscreen = $state(false);
+  let isLayoutFocusTitlebarVisible = $state(false);
 
   setElectronContext(window.electron.ipcRenderer);
   setNeuzosBridgeContext(neuzosBridge);
@@ -126,10 +129,12 @@
       defaultLaunchMode: 'normal',
       userAgent: undefined,
       autoSaveSettings: false,
+      globalAutoFocus: true,
       titleBarButtons: {
         darkModeToggle: false,
         fullscreenToggle: true,
-        keybindToggle: true
+        keybindToggle: true,
+        widgetsToggle: true
       },
       fullscreen: {
         hideTitleBarInMainWindow: true,
@@ -144,13 +149,50 @@
       visible: true,
       activeLayoutId: null,
       previousLayoutId: null,
+      activeLayoutSession: null,
+      focusedLayoutSession: null,
     },
     sessionsLayoutsRef: {},
+    sessionWindowSessionIds: [],
     doCalculationUpdatesRng: 0
   })
 
   const electronApi = window.electron.ipcRenderer;
   const cleanupListeners: Array<() => void> = []
+  let mainWindowFocused = document.hasFocus()
+  let hoverFocusRequestPending = false
+  let hoverFocusAttempted = false
+  const focusMainWindowOnHover = () => {
+    if (mainWindowState.config.globalAutoFocus === false || mainWindowFocused || hoverFocusRequestPending || hoverFocusAttempted) return
+    hoverFocusAttempted = true
+    hoverFocusRequestPending = true
+    void electronApi.invoke('window.focus_on_hover').finally(() => {
+      hoverFocusRequestPending = false
+    })
+  }
+  const markMainWindowFocused = () => {
+    mainWindowFocused = true
+    hoverFocusAttempted = false
+  }
+  const markMainWindowBlurred = () => {
+    mainWindowFocused = false
+    hoverFocusAttempted = false
+  }
+  const resetHoverFocusAttempt = () => {
+    hoverFocusAttempted = false
+  }
+  const updateLayoutFocusTitlebarVisibility = (event: MouseEvent) => {
+    focusMainWindowOnHover()
+    isLayoutFocusTitlebarVisible = shouldRevealLayoutFocusTitlebar(
+      Boolean(mainWindowState.tabs.focusedLayoutSession),
+      event.clientY,
+    )
+  }
+
+  addEventListener('mousemove', updateLayoutFocusTitlebarVisibility)
+  addEventListener('focus', markMainWindowFocused)
+  addEventListener('blur', markMainWindowBlurred)
+  addEventListener('mouseleave', resetHoverFocusAttempt)
 
   const listen = (channel: string, listener: (...args: any[]) => void) => {
     electronApi.on(channel, listener)
@@ -159,6 +201,10 @@
 
   onDestroy(() => {
     cleanupListeners.forEach((cleanup) => cleanup())
+    removeEventListener('mousemove', updateLayoutFocusTitlebarVisibility)
+    removeEventListener('focus', markMainWindowFocused)
+    removeEventListener('blur', markMainWindowBlurred)
+    removeEventListener('mouseleave', resetHoverFocusAttempt)
   })
 
   listen('event.layout_add', (_, layoutId: string) => {
@@ -181,10 +227,39 @@
     }
   })
 
+  const isLayoutUnavailable = (layoutId: string | null): boolean => {
+    if (!layoutId || layoutId === 'home') return false
+    return isSingleSessionLayoutOpenInSessionWindow(
+      mainWindowState.layouts.find((layout) => layout.id === layoutId),
+      mainWindowState.sessionWindowSessionIds
+    )
+  }
+
+  const getAvailableLayoutOrder = (): string[] => {
+    return mainWindowState.tabs.layoutOrder.filter((layoutId) => !isLayoutUnavailable(layoutId))
+  }
+
+  const reconcileUnavailableLayouts = () => {
+    if (isLayoutUnavailable(mainWindowState.tabs.previousLayoutId)) {
+      mainWindowState.tabs.previousLayoutId = null
+    }
+
+    if (!isLayoutUnavailable(mainWindowState.tabs.activeLayoutId)) return
+
+    const fallbackLayoutId = getAvailableLayoutOrder()[0] ?? 'home'
+    mainWindowState.tabs.activeLayoutId = fallbackLayoutId
+    mainWindowState.tabs.previousLayoutId = null
+    mainWindowState.tabs.activeLayoutSession = null
+  }
+
   listen('event.layout_switch', (_, layoutId: string) => {
     console.log("layout_switch", layoutId)
-    mainWindowState.tabs.previousLayoutId = mainWindowState.tabs.activeLayoutId
+    if (isLayoutUnavailable(layoutId)) return
+    mainWindowState.tabs.previousLayoutId = isLayoutUnavailable(mainWindowState.tabs.activeLayoutId)
+      ? null
+      : mainWindowState.tabs.activeLayoutId
     mainWindowState.tabs.activeLayoutId = layoutId
+    mainWindowState.tabs.activeLayoutSession = null
   })
 
   const closeLayout = (layoutId: string, mirrorDefaultLayouts = false) => {
@@ -193,6 +268,9 @@
       mainWindowState.tabs.activeLayoutId = mainWindowState.tabs.previousLayoutId ?? null
     }
     mainWindowState.tabs.layoutOrder = mainWindowState.tabs.layoutOrder.filter(id => id !== layoutId)
+    if (mainWindowState.tabs.activeLayoutSession?.layoutId === layoutId) {
+      mainWindowState.tabs.activeLayoutSession = null
+    }
 
     if (mirrorDefaultLayouts && readSettingsLayoutAutoSave() && mainWindowState.config.defaultLayouts.includes(layoutId)) {
       mainWindowState.config.defaultLayouts = mainWindowState.config.defaultLayouts.filter((defaultLayoutId) => defaultLayoutId !== layoutId)
@@ -204,6 +282,7 @@
   listen('event.layout_close_all', (_) => {
     mainWindowState.tabs.previousLayoutId = null
     mainWindowState.tabs.activeLayoutId = 'home'
+    mainWindowState.tabs.activeLayoutSession = null
     mainWindowState.tabs.layoutsIds.forEach(layoutId => {
       closeLayout(layoutId)
     })
@@ -219,28 +298,34 @@
   listen('event.layout_swap', (_) => {
     const activeLayoutId = mainWindowState.tabs.activeLayoutId
     const previousLayoutId = mainWindowState.tabs.previousLayoutId
-    if (previousLayoutId) {
+    if (previousLayoutId && !isLayoutUnavailable(previousLayoutId)) {
       const newLayoutId = previousLayoutId
-      mainWindowState.tabs.previousLayoutId = activeLayoutId
+      mainWindowState.tabs.previousLayoutId = isLayoutUnavailable(activeLayoutId) ? null : activeLayoutId
       mainWindowState.tabs.activeLayoutId = newLayoutId
+      mainWindowState.tabs.activeLayoutSession = null
+    } else if (previousLayoutId) {
+      mainWindowState.tabs.previousLayoutId = null
     }
   })
 
   const cycleLayout = (direction: 1 | -1) => {
-    const layoutOrder = mainWindowState.tabs.layoutOrder
-    if (layoutOrder.length <= 1) {
+    const layoutOrder = getAvailableLayoutOrder()
+    if (layoutOrder.length === 0) {
       return
     }
 
     const activeLayoutId = mainWindowState.tabs.activeLayoutId
     const currentIndex = layoutOrder.findIndex(layoutId => layoutId === activeLayoutId)
     const nextIndex = currentIndex === -1
-      ? 0
+      ? (direction === 1 ? 0 : layoutOrder.length - 1)
       : (currentIndex + direction + layoutOrder.length) % layoutOrder.length
     const nextLayoutId = layoutOrder[nextIndex]
 
-    mainWindowState.tabs.previousLayoutId = activeLayoutId
+    if (nextLayoutId === activeLayoutId) return
+
+    mainWindowState.tabs.previousLayoutId = isLayoutUnavailable(activeLayoutId) ? null : activeLayoutId
     mainWindowState.tabs.activeLayoutId = nextLayoutId
+    mainWindowState.tabs.activeLayoutSession = null
   }
 
   listen('event.layout_cycle_forward', (_) => {
@@ -398,6 +483,15 @@
     activeClient.sendKey(ingameKey)
   }
 
+  listen('event.send_key_to_session', (_, sessionId: string, ingameKey: string) => {
+    sendKeyToReceiverSession(sessionId, ingameKey)
+  })
+
+  listen('event.session_windows_changed', (_, sessionIds: string[]) => {
+    mainWindowState.sessionWindowSessionIds = Array.isArray(sessionIds) ? sessionIds : []
+    reconcileUnavailableLayouts()
+  })
+
   listen('event.send_to_receiver', (_, ingameKey: string) => {
     const receiverId = mainWindowState.config.syncReceiverSessionId
     if (!receiverId) return
@@ -510,6 +604,7 @@
     mainWindowState.config.userAgent = newConfig.userAgent || undefined
     mainWindowState.config.titleBarButtons = newConfig.titleBarButtons
     mainWindowState.config.window = newConfig.window
+    mainWindowState.config.globalAutoFocus = newConfig.globalAutoFocus ?? true
     mainWindowState.config.fullscreen = newConfig.fullscreen || {
       hideTitleBarInMainWindow: true,
       hideTitleBarInSessionLayouts: true
@@ -536,6 +631,18 @@
   // Listen for fullscreen state changes
   listen('event.fullscreen_changed', (_, fullscreen: boolean) => {
     isFullscreen = fullscreen
+    if (!fullscreen) {
+      mainWindowState.tabs.focusedLayoutSession = null
+    }
+  })
+
+  listen('event.session_fullscreen_toggle', () => {
+    mainWindowState.tabs.focusedLayoutSession = toggleLayoutFullscreen(
+      mainWindowState.tabs.focusedLayoutSession,
+      mainWindowState.tabs.activeLayoutSession,
+      mainWindowState.tabs.activeLayoutId,
+      neuzosBridge.mainWindow.fullscreenToggle
+    )
   })
 
   setContext('mainWindowState', mainWindowState)
@@ -637,6 +744,8 @@
       mainWindowState.tabs.layoutOrder = JSON.parse(JSON.stringify(validDefaultLayouts))
       mainWindowState.tabs.activeLayoutId = 'home'
       mainWindowState.tabs.previousLayoutId = null
+      mainWindowState.sessionWindowSessionIds = await neuzosBridge.sessions.getSessionWindowIds()
+      reconcileUnavailableLayouts()
 
       // Load the registry in the background so the app UI can appear even if it fails.
       void (async () => {
@@ -670,13 +779,19 @@
 {:else}
   <SharedEvents/>
   <div class="w-full h-full flex flex-col border-2 relative">
-    {#if !isFullscreen || !mainWindowState.config.fullscreen?.hideTitleBarInMainWindow}
-      <MainBar/>
+    {#if !isFullscreen || !mainWindowState.config.fullscreen?.hideTitleBarInMainWindow || mainWindowState.tabs.focusedLayoutSession}
+      <div
+        class="relative z-40 shrink-0 transition-transform duration-150 ease-out {mainWindowState.tabs.focusedLayoutSession && !isLayoutFocusTitlebarVisible
+          ? '-translate-y-full'
+          : 'translate-y-0'}"
+      >
+        <MainBar {isFullscreen}/>
+      </div>
     {/if}
     <MainSectionsContainer/>
 
     <!-- Floating Exit Fullscreen Button -->
-    {#if isFullscreen && mainWindowState.config.fullscreen?.hideTitleBarInMainWindow}
+    {#if isFullscreen && mainWindowState.config.fullscreen?.hideTitleBarInMainWindow && !mainWindowState.tabs.focusedLayoutSession}
       <Button
         size="icon-sm"
         variant="secondary"

@@ -6,7 +6,6 @@
     X,
     Plus,
     RefreshCcw,
-    VolumeX,
     Volume2,
     VolumeOff,
     Square,
@@ -29,9 +28,10 @@
     Columns2,
     CircleQuestionMark,
     Search,
-    ArrowDown
+    ArrowDown,
+    ExternalLink
   } from '@lucide/svelte'
-  import {getContext, onMount} from "svelte";
+  import {getContext, onDestroy, onMount} from "svelte";
   import type {MainWindowState, NeuzLayout, NeuzSession, NeuzSessionGroup} from "$lib/types";
   import * as Dialog from '$lib/components/ui/dialog'
   import * as ContextMenu from '$lib/components/ui/context-menu'
@@ -41,7 +41,6 @@
   import {getElectronContext} from "$lib/contexts/electronContext";
   import * as DropdownMenu from '$lib/components/ui/dropdown-menu'
   import {cn} from "$lib/utils";
-  import {Separator} from "$lib/components/ui/separator";
   import {Input} from "$lib/components/ui/input";
   import PinnedActions from "./MainBarComponents/PinnedActions.svelte";
   import PinnedWidgetLaunchers from "./MainBarComponents/PinnedWidgetLaunchers.svelte";
@@ -50,20 +49,60 @@
   import {getQuestPanelContext} from "$lib/contexts/questPanelContext.svelte";
   import {getUIActionContext} from "$lib/contexts/uiActionContext.svelte";
   import {
+    readSettingsLayoutAnimatedBadge,
     readSettingsCollapsedGroups,
+    SETTINGS_LAYOUT_ANIMATED_BADGE_STORAGE_KEY,
     writeSettingsCollapsedGroups,
   } from "$lib/localStorageStores";
+  import {
+    temporaryLayoutRendering,
+    type TemporaryLayoutRenderingLease,
+  } from "$lib/temporaryLayoutRendering.svelte";
+  import {isSingleSessionLayoutOpenInSessionWindow} from "$lib/layoutAvailability";
+  import {
+    getIndicatorEffectClass,
+    LAYOUT_INDICATOR_EFFECT_CLASS,
+    STATIC_INDICATOR_EFFECT_CLASS,
+    type IndicatorEffect
+  } from "$lib/indicatorEffects";
+
+  let {isFullscreen = false}: {isFullscreen?: boolean} = $props();
 
   let shortcutsEnabled = $state(true);
   let collapsedSessionGroupIds: Record<string, boolean> = $state({});
   let hasVisibleActionPins = $state(false);
+  let hasPinnedWidgetLaunchers = $state(false);
   let launcherTab: 'layouts' | 'sessions' = $state('layouts');
   let layoutLauncherSearchQuery = $state('');
   let sessionLauncherSearchQuery = $state('');
   const ungroupedGroupId = 'ungrouped';
+  const START_ALL_BACKGROUND_RENDER_MS = 5000;
+  let startAllLayoutsPending = $state(false);
+  let layoutBadgeAnimated = $state(true);
+  let layoutBadgeAnimationEffect: IndicatorEffect = $state('effect1');
+  let draggedLayoutBadgeId = $state<string | null>(null);
+  let draggedLayoutBadgeWidth = $state(0);
+  let layoutBadgeDropTargetId = $state<string | null>(null);
+  let layoutBadgeDropPosition = $state<'before' | 'after' | null>(null);
+  let suppressLayoutBadgeClickUntil = 0;
+  let startAllLayoutRenderingLease: TemporaryLayoutRenderingLease | null = null;
+  let startAllLayoutRenderingTimeout: ReturnType<typeof setTimeout> | null = null;
+
+  onDestroy(() => {
+    if (startAllLayoutRenderingTimeout !== null) {
+      clearTimeout(startAllLayoutRenderingTimeout);
+    }
+    startAllLayoutRenderingLease?.release();
+  });
 
   function loadCollapsedSessionGroups() {
     collapsedSessionGroupIds = readSettingsCollapsedGroups('sessionLauncherMainbar', sanitizeCollapsedSessionGroups);
+  }
+
+  function loadLayoutBadgeAnimationSettings() {
+    const settings = readSettingsLayoutAnimatedBadge();
+    layoutBadgeAnimated = settings.enabled;
+    layoutBadgeAnimationEffect = settings.effect;
   }
 
   function saveCollapsedSessionGroups() {
@@ -89,11 +128,20 @@
 
   onMount(() => {
     loadCollapsedSessionGroups();
+    loadLayoutBadgeAnimationSettings();
     const handleShortcutsStateChanged = (_: any, newEnabled: boolean) => {
       shortcutsEnabled = newEnabled;
     };
     const handleActiveKeybindProfileChanged = (_: any, profileId: string) => {
       mainWindowState.config.activeKeyBindProfileId = profileId;
+    };
+    const handleLayoutBadgeAnimationStorage = (event: StorageEvent) => {
+      if (event.key === SETTINGS_LAYOUT_ANIMATED_BADGE_STORAGE_KEY || event.key === null) {
+        loadLayoutBadgeAnimationSettings();
+      }
+    };
+    const refreshLayoutBadgeAnimation = () => {
+      loadLayoutBadgeAnimationSettings();
     };
 
     void electronApi.invoke("shortcuts.get_state")
@@ -106,10 +154,14 @@
 
     electronApi.on("event.shortcuts_state_changed", handleShortcutsStateChanged);
     electronApi.on("event.active_keybind_profile_changed", handleActiveKeybindProfileChanged);
+    window.addEventListener('storage', handleLayoutBadgeAnimationStorage);
+    window.addEventListener('focus', refreshLayoutBadgeAnimation);
 
     return () => {
       electronApi.removeListener("event.shortcuts_state_changed", handleShortcutsStateChanged);
       electronApi.removeListener("event.active_keybind_profile_changed", handleActiveKeybindProfileChanged);
+      window.removeEventListener('storage', handleLayoutBadgeAnimationStorage);
+      window.removeEventListener('focus', refreshLayoutBadgeAnimation);
     };
   });
 
@@ -129,6 +181,19 @@
   const electronApi = getElectronContext();
   const questPanel = getQuestPanelContext();
   const uiActionContext = getUIActionContext();
+  const showFullscreenToggle = $derived(
+    mainWindowState.config.titleBarButtons.fullscreenToggle
+    || isFullscreen
+    || Boolean(mainWindowState.tabs.focusedLayoutSession)
+  );
+  const hasControlsAfterActionPins = $derived(
+    hasPinnedWidgetLaunchers
+    || (mainWindowState.config.titleBarButtons.widgetsToggle ?? true)
+    || mainWindowState.config.titleBarButtons.keybindToggle
+    || mainWindowState.config.titleBarButtons.darkModeToggle
+    || showFullscreenToggle
+  );
+  const hasMainBarControls = $derived(hasVisibleActionPins || hasControlsAfterActionPins);
 
   onMount(() => {
     uiActionContext.register('ui.toggle_quest_log', () => questPanel.toggle());
@@ -229,11 +294,90 @@
   }
 
   const switchToLayout = (layoutId: string) => {
+    if (isLayoutUnavailable(layoutId)) return
     neuzosBridge.layouts.switch(layoutId)
   }
 
   const closeLayout = (layoutId: string) => {
     neuzosBridge.layouts.close(layoutId)
+  }
+
+  const clearLayoutBadgeDragState = () => {
+    draggedLayoutBadgeId = null
+    draggedLayoutBadgeWidth = 0
+    layoutBadgeDropTargetId = null
+    layoutBadgeDropPosition = null
+  }
+
+  const handleLayoutBadgeDragStart = (event: DragEvent, layoutId: string) => {
+    draggedLayoutBadgeId = layoutId
+    draggedLayoutBadgeWidth = (event.currentTarget as HTMLElement).getBoundingClientRect().width
+    layoutBadgeDropTargetId = null
+    layoutBadgeDropPosition = null
+
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'move'
+      event.dataTransfer.setData('application/x-neuzos-layout', layoutId)
+      event.dataTransfer.setData('text/plain', layoutId)
+    }
+  }
+
+  const handleLayoutBadgeDragOver = (event: DragEvent, layoutId: string) => {
+    if (!draggedLayoutBadgeId || draggedLayoutBadgeId === layoutId) return
+
+    event.preventDefault()
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+
+    const target = event.currentTarget as HTMLElement
+    const bounds = target.getBoundingClientRect()
+    layoutBadgeDropTargetId = layoutId
+    layoutBadgeDropPosition = event.clientX < bounds.left + bounds.width / 2 ? 'before' : 'after'
+  }
+
+  const handleLayoutBadgePlaceholderDragOver = (
+    event: DragEvent,
+    targetLayoutId: string,
+    dropPosition: 'before' | 'after'
+  ) => {
+    if (!draggedLayoutBadgeId || draggedLayoutBadgeId === targetLayoutId) return
+
+    event.preventDefault()
+    event.stopPropagation()
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+    layoutBadgeDropTargetId = targetLayoutId
+    layoutBadgeDropPosition = dropPosition
+  }
+
+  const handleLayoutBadgeDrop = (event: DragEvent, targetLayoutId: string) => {
+    event.preventDefault()
+    event.stopPropagation()
+
+    const sourceLayoutId = draggedLayoutBadgeId
+      ?? event.dataTransfer?.getData('application/x-neuzos-layout')
+      ?? null
+    const dropPosition = layoutBadgeDropPosition
+
+    if (!sourceLayoutId || sourceLayoutId === targetLayoutId || !dropPosition) {
+      clearLayoutBadgeDragState()
+      return
+    }
+
+    const nextOrder = mainWindowState.tabs.layoutOrder.filter(layoutId => layoutId !== sourceLayoutId)
+    const targetIndex = nextOrder.indexOf(targetLayoutId)
+    if (targetIndex < 0) {
+      clearLayoutBadgeDragState()
+      return
+    }
+
+    nextOrder.splice(targetIndex + (dropPosition === 'after' ? 1 : 0), 0, sourceLayoutId)
+    mainWindowState.tabs.layoutOrder = nextOrder
+    suppressLayoutBadgeClickUntil = Date.now() + 200
+    clearLayoutBadgeDragState()
+  }
+
+  const handleLayoutBadgeDragEnd = () => {
+    suppressLayoutBadgeClickUntil = Date.now() + 200
+    clearLayoutBadgeDragState()
   }
 
   const toggleLayoutInMainBar = (layoutId: string) => {
@@ -311,6 +455,20 @@
     saveMutedLayoutState()
   }
 
+  const getLayoutSessionIds = (layoutId: string) => {
+    const layout = mainWindowState.layouts.find((candidate) => candidate.id === layoutId)
+    return layout?.rows.flatMap((row) => row.sessionIds) ?? []
+  }
+
+  const areAllLayoutSessionsMuted = (layoutId: string) => {
+    const sessionIds = getLayoutSessionIds(layoutId)
+    return sessionIds.length > 0 && sessionIds.every((sessionId) => isSessionMuted(layoutId, sessionId))
+  }
+
+  const isAnyLayoutSessionMuted = (layoutId: string) => {
+    return getLayoutSessionIds(layoutId).some((sessionId) => isSessionMuted(layoutId, sessionId))
+  }
+
   const stopAllSessions = (layoutId: string) => {
     for (const sessionId in mainWindowState.sessionsLayoutsRef) {
       mainWindowState.sessionsLayoutsRef[sessionId]?.layouts[layoutId]?.stopClient()
@@ -321,9 +479,79 @@
     const layout = mainWindowState.layouts.find(l => l.id === layoutId)
     if (layout) {
       layout.rows.flatMap(r => r.sessionIds).forEach(sessionId => {
-        neuzosBridge.sessions.start(sessionId, layoutId)
+        if (!isSessionStarted(layoutId, sessionId)) {
+          neuzosBridge.sessions.start(sessionId, layoutId)
+        }
       })
     }
+  }
+
+  const areAllLayoutSessionsStarted = (layoutId: string) => {
+    const layout = mainWindowState.layouts.find(candidate => candidate.id === layoutId)
+    const sessionIds = layout?.rows.flatMap(row => row.sessionIds) ?? []
+    return sessionIds.length > 0 && sessionIds.every(sessionId => isSessionStarted(layoutId, sessionId))
+  }
+
+  const isAnyLayoutSessionStarted = (layoutId: string) => {
+    const layout = mainWindowState.layouts.find(candidate => candidate.id === layoutId)
+    return layout?.rows.some(row => row.sessionIds.some(sessionId => isSessionStarted(layoutId, sessionId))) ?? false
+  }
+
+  const isLayoutUnavailable = (layoutId: string): boolean => {
+    return isSingleSessionLayoutOpenInSessionWindow(
+      mainWindowState.layouts.find((layout) => layout.id === layoutId),
+      mainWindowState.sessionWindowSessionIds
+    )
+  }
+
+  const restartAllSessions = (layoutId: string) => {
+    const layout = mainWindowState.layouts.find(candidate => candidate.id === layoutId)
+    layout?.rows.flatMap(row => row.sessionIds).forEach(sessionId => restartSession(layoutId, sessionId))
+  }
+
+  const getMainbarLayoutsToStart = () => {
+    return mainWindowState.tabs.layoutsIds.filter(layoutId => {
+      if (isLayoutUnavailable(layoutId)) return false
+      const layout = mainWindowState.layouts.find(candidate => candidate.id === layoutId)
+      return layout?.rows.some(row => row.sessionIds.some(sessionId => !isSessionStarted(layoutId, sessionId))) ?? false
+    })
+  }
+
+  const startAllMainbarLayouts = () => {
+    if (startAllLayoutsPending) return
+
+    const layoutIds = getMainbarLayoutsToStart()
+    if (layoutIds.length === 0) return
+
+    if (mainWindowState.tabs.activeLayoutId === 'home') {
+      const firstMainbarLayoutId = mainWindowState.tabs.layoutOrder.find(layoutId =>
+        mainWindowState.tabs.layoutsIds.includes(layoutId) &&
+        !isLayoutUnavailable(layoutId) &&
+        mainWindowState.layouts.some(layout => layout.id === layoutId)
+      )
+      if (firstMainbarLayoutId) {
+        switchToLayout(firstMainbarLayoutId)
+      }
+    }
+
+    startAllLayoutsPending = true
+    startAllLayoutRenderingLease?.release()
+    startAllLayoutRenderingLease = temporaryLayoutRendering.acquire(layoutIds)
+    layoutIds.forEach(startAllSessions)
+
+    if (startAllLayoutRenderingTimeout !== null) {
+      clearTimeout(startAllLayoutRenderingTimeout)
+    }
+    startAllLayoutRenderingTimeout = setTimeout(() => {
+      startAllLayoutRenderingLease?.release()
+      startAllLayoutRenderingLease = null
+      startAllLayoutRenderingTimeout = null
+      startAllLayoutsPending = false
+    }, START_ALL_BACKGROUND_RENDER_MS)
+  }
+
+  const hasMainbarSessionsToStart = () => {
+    return !startAllLayoutsPending && getMainbarLayoutsToStart().length > 0
   }
 
   const muteSession = (layoutId: string, sessionId: string) => {
@@ -510,10 +738,18 @@
 <div
   id="titlebar"
   class="gap-2 p-1 px-2 select-none border-b border-accent flex items-center justify-end bg-accent/50 min-h-10"
+  style="-webkit-app-region: drag;"
 >
-  <div class="flex items-center gap-2">
-    <img src="favicon.png" alt="NeuzOS Logo" class="size-6"/>
-  </div>
+  <Button
+    disabled={!hasMainbarSessionsToStart()}
+    size="icon-xs"
+    variant="ghost"
+    onclick={startAllMainbarLayouts}
+    class="cursor-pointer border border-transparent bg-transparent shadow-none enabled:hover:border-input disabled:cursor-default disabled:opacity-100"
+    title="Start All Layouts"
+  >
+    <img src="neuzos_pang.png" alt="" class="size-5 object-contain"/>
+  </Button>
   <Button disabled={mainWindowState.tabs.activeLayoutId === 'home'} size="icon-xs" variant="outline"
           onclick={switchToHome} class="cursor-pointer">
     <Home class="size-3.5"/>
@@ -745,12 +981,44 @@
     {#each mainWindowState.tabs.layoutOrder as layoutId (layoutId)}
       {@const layTab = mainWindowState.layouts.find(l => l.id === layoutId)}
       {#if !layTab}{:else}
-      {@const disabledSwitch = mainWindowState.tabs.activeLayoutId === layoutId}
+      {@const isActiveLayout = mainWindowState.tabs.activeLayoutId === layoutId}
+      {@const isUnavailableLayout = isLayoutUnavailable(layoutId)}
+
+      {#if layoutBadgeDropTargetId === layoutId && layoutBadgeDropPosition === 'before'}
+        <button
+          type="button"
+          tabindex="-1"
+          aria-label="Layout drop position"
+          class="h-7 shrink-0 rounded-md border-2 border-dashed border-primary/80 bg-primary/5 shadow-sm shadow-primary/15"
+          style={`width: ${Math.max(32, draggedLayoutBadgeWidth)}px;`}
+          ondragover={(event) => handleLayoutBadgePlaceholderDragOver(event, layoutId, 'before')}
+          ondrop={(event) => handleLayoutBadgeDrop(event, layoutId)}
+        ></button>
+      {/if}
 
       <ContextMenu.Root>
         <ContextMenu.Trigger>
-          <Button variant="outline" size="xs" class="text-center" disabled={disabledSwitch}
-                  onclick={() => switchToLayout(layoutId)}>
+          <Button
+            variant="outline"
+            size="xs"
+            draggable={!isUnavailableLayout}
+            ondragstart={(event) => handleLayoutBadgeDragStart(event, layoutId)}
+            ondragover={(event) => handleLayoutBadgeDragOver(event, layoutId)}
+            ondrop={(event) => handleLayoutBadgeDrop(event, layoutId)}
+            ondragend={handleLayoutBadgeDragEnd}
+            class={cn(
+              "relative cursor-default text-center",
+              draggedLayoutBadgeId === layoutId && "opacity-50",
+              isActiveLayout && `${LAYOUT_INDICATOR_EFFECT_CLASS} border-foreground/80 bg-accent font-semibold shadow-sm`,
+              isActiveLayout && (layoutBadgeAnimated ? getIndicatorEffectClass(layoutBadgeAnimationEffect) : STATIC_INDICATOR_EFFECT_CLASS)
+            )}
+            disabled={isUnavailableLayout}
+            aria-current={isActiveLayout ? 'page' : undefined}
+            onclick={() => {
+              if (Date.now() < suppressLayoutBadgeClickUntil) return
+              if (!isActiveLayout) switchToLayout(layoutId)
+            }}
+          >
             <img src="icons/{layTab.icon.slug}.png" alt={layTab.icon.slug} class="w-4 h-4"/>
             {layTab.label}
             {#if layoutHasActiveReceiver(layTab)}
@@ -804,29 +1072,41 @@
           </ContextMenu.Label>
           <ContextMenu.Separator class="mx-2"/>
           <div class="flex items-center justify-between gap-2">
-            <ContextMenu.Item class={cn("flex-1 items-center justify-center")}
-                              onclick={() => unmuteAllSessions(layTab.id)}>
-              <Volume2 class="h=4"/>
-            </ContextMenu.Item
-            >
-            <ContextMenu.Item class={cn("flex-1 items-center justify-center")}
-                              onclick={() => muteAllSessions(layTab.id)}>
-              <VolumeOff class="h=4"/>
-            </ContextMenu.Item
-            >
+            {#if isAnyLayoutSessionMuted(layTab.id)}
+              <ContextMenu.Item class={cn("flex-1 items-center justify-center")}
+                                onclick={() => unmuteAllSessions(layTab.id)}>
+                <Volume2 class="h-4"/>
+              </ContextMenu.Item
+              >
+            {/if}
+            {#if !areAllLayoutSessionsMuted(layTab.id)}
+              <ContextMenu.Item class={cn("flex-1 items-center justify-center")}
+                                onclick={() => muteAllSessions(layTab.id)}>
+                <VolumeOff class="h-4"/>
+              </ContextMenu.Item
+              >
+            {/if}
           </div>
           <ContextMenu.Separator class="mx-2"/>
           <div class="flex items-center justify-between gap-2">
             <ContextMenu.Item class={cn("flex-1 items-center justify-center")}
-                              onclick={() => startAllSessions(layTab.id)}>
-              <Play class="h=4"/>
+                              onclick={() => areAllLayoutSessionsStarted(layTab.id)
+                                ? restartAllSessions(layTab.id)
+                                : startAllSessions(layTab.id)}>
+              {#if areAllLayoutSessionsStarted(layTab.id)}
+                <RefreshCcw class="h-4"/>
+              {:else}
+                <Play class="h-4"/>
+              {/if}
             </ContextMenu.Item
             >
-            <ContextMenu.Item class={cn("flex-1 items-center justify-center")}
-                              onclick={() => stopAllSessions(layTab.id)}>
-              <Square class="h=4"/>
-            </ContextMenu.Item
-            >
+            {#if isAnyLayoutSessionStarted(layTab.id)}
+              <ContextMenu.Item class={cn("flex-1 items-center justify-center")}
+                                onclick={() => stopAllSessions(layTab.id)}>
+                <Square class="h-4"/>
+              </ContextMenu.Item
+              >
+            {/if}
           </div>
           <ContextMenu.Separator/>
           {#each layTab.rows as row,idx (idx)}
@@ -845,12 +1125,19 @@
                         <RadioTower class="w-4 h-4"/>
                       {/if}
                       {#if isSessionMuted(layoutId, sessionId)}
-                        <VolumeX class="w-4 h-4"/>
+                        <VolumeOff class="w-4 h-4"/>
                       {/if}
                     </div>
                   </div>
                 </ContextMenu.SubTrigger>
                 <ContextMenu.SubContent class="w-48">
+                  <ContextMenu.Item onclick={() => launchSession(sessionId, 'session')}>
+                    <div class="flex items-center gap-2">
+                      <ExternalLink class="h-4"/>
+                      Pop-Out Session
+                    </div>
+                  </ContextMenu.Item>
+                  <ContextMenu.Separator/>
                   <ContextMenu.Item
                     onclick={() => isSessionMuted(layoutId, sessionId) ? unmuteSession(layoutId,sessionId) : muteSession(layoutId, sessionId)}>
                     <div class="flex items-center gap-2">
@@ -864,6 +1151,15 @@
                     </div>
                   </ContextMenu.Item>
                   <ContextMenu.Separator/>
+                  {#if isSessionStarted(layoutId, sessionId)}
+                    <ContextMenu.Item
+                      onclick={() => restartSession(layoutId, sessionId)}>
+                      <div class="flex items-center gap-2">
+                        <RefreshCcw class="h-4"/>
+                        Restart
+                      </div>
+                    </ContextMenu.Item>
+                  {/if}
                   <ContextMenu.Item
                     onclick={() => isSessionStarted(layoutId, sessionId) ? stopSession(sessionId) : startSession(layoutId, sessionId)}>
                     <div class="flex items-center gap-2">
@@ -874,13 +1170,6 @@
                         <Play class="h-4"/>
                         Start
                       {/if}
-                    </div>
-                  </ContextMenu.Item>
-                  <ContextMenu.Item
-                    onclick={() => restartSession(layoutId, sessionId)}>
-                    <div class="flex items-center gap-2">
-                      <RefreshCcw class="h-4"/>
-                      Restart
                     </div>
                   </ContextMenu.Item>
                   <ContextMenu.Separator/>
@@ -930,6 +1219,18 @@
           {/each}
         </ContextMenu.Content>
       </ContextMenu.Root>
+
+      {#if layoutBadgeDropTargetId === layoutId && layoutBadgeDropPosition === 'after'}
+        <button
+          type="button"
+          tabindex="-1"
+          aria-label="Layout drop position"
+          class="h-7 shrink-0 rounded-md border-2 border-dashed border-primary/80 bg-primary/5 shadow-sm shadow-primary/15"
+          style={`width: ${Math.max(32, draggedLayoutBadgeWidth)}px;`}
+          ondragover={(event) => handleLayoutBadgePlaceholderDragOver(event, layoutId, 'after')}
+          ondrop={(event) => handleLayoutBadgeDrop(event, layoutId)}
+        ></button>
+      {/if}
       {/if}
     {/each}
   </div>
@@ -940,12 +1241,16 @@
 
   <PinnedActions onHasPinnedActionsChange={(hasPinnedActions) => hasVisibleActionPins = hasPinnedActions}/>
 
-  {#if hasVisibleActionPins}
-    <Separator orientation="vertical" class="h-4"/>
+  {#if hasVisibleActionPins && hasControlsAfterActionPins}
+    <div aria-hidden="true" class="h-7 w-px shrink-0 bg-border"></div>
   {/if}
 
-  <PinnedWidgetLaunchers/>
-  <WidgetsButton/>
+  <PinnedWidgetLaunchers
+    onHasPinnedLaunchersChange={(hasPinnedLaunchers) => hasPinnedWidgetLaunchers = hasPinnedLaunchers}
+  />
+  {#if mainWindowState.config.titleBarButtons.widgetsToggle ?? true}
+    <WidgetsButton/>
+  {/if}
   {#if mainWindowState.config.titleBarButtons.keybindToggle}
     <DropdownMenu.Root>
       <DropdownMenu.Trigger>
@@ -993,16 +1298,18 @@
     <ThemeToggle/>
   {/if}
 
-  <Separator orientation="vertical" class="h-4"/>
-  {#if mainWindowState.config.titleBarButtons.fullscreenToggle}
+  {#if showFullscreenToggle}
+    <div aria-hidden="true" class="h-7 w-px shrink-0 bg-border"></div>
     <Button size="icon-xs" variant="outline" onclick={() => {
         neuzosBridge.mainWindow.fullscreenToggle()
       }} class="cursor-pointer">
       <Fullscreen class="size-3.5"/>
     </Button>
-    <Separator orientation="vertical" class="h-4"/>
   {/if}
 
+  {#if hasMainBarControls}
+    <div aria-hidden="true" class="h-7 w-px shrink-0 bg-border"></div>
+  {/if}
   <Button
     size="icon-xs"
     variant="outline"
@@ -1034,3 +1341,16 @@
     <X class="size-3.5"/>
   </Button>
 </div>
+
+<style>
+  #titlebar :global(button),
+  #titlebar :global(a),
+  #titlebar :global(input),
+  #titlebar :global(select),
+  #titlebar :global(textarea),
+  #titlebar :global([role='button']),
+  #titlebar :global([role='menuitem']),
+  #titlebar :global([contenteditable='true']) {
+    -webkit-app-region: no-drag;
+  }
+</style>

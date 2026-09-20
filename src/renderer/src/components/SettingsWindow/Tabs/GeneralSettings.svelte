@@ -5,7 +5,7 @@
   import {Label} from "$lib/components/ui/label";
   import {Button} from "$lib/components/ui/button";
   import {Separator} from "$lib/components/ui/separator";
-  import {Fullscreen, Keyboard, Moon, SquareArrowOutUpRight} from "@lucide/svelte";
+  import {Fullscreen, Keyboard, Moon, Puzzle, SquareArrowOutUpRight} from "@lucide/svelte";
 
   import {getContext, onMount} from "svelte";
   import {getElectronContext} from "$lib/contexts/electronContext";
@@ -92,7 +92,8 @@
     neuzosConfig.titleBarButtons = {
       darkModeToggle: false,
       fullscreenToggle: true,
-      keybindToggle: true
+      keybindToggle: true,
+      widgetsToggle: true
     };
   }
 
@@ -204,6 +205,13 @@
     neuzosConfig.titleBarButtons.keybindToggle = enabled;
   }
 
+  function handleWidgetsToggle(enabled: boolean) {
+    if (!neuzosConfig.titleBarButtons) {
+      neuzosConfig.titleBarButtons = {} as NonNullable<NeuzConfig['titleBarButtons']>;
+    }
+    neuzosConfig.titleBarButtons.widgetsToggle = enabled;
+  }
+
   // Handle auto-save toggle
   function handleAutoSaveToggle(enabled: boolean) {
     neuzosConfig.autoSaveSettings = enabled;
@@ -211,6 +219,10 @@
 
   function handleStartupCacheToggle(enabled: boolean) {
     neuzosConfig.autoDeleteAllCachesOnStartup = enabled;
+  }
+
+  function handleGlobalAutoFocusToggle(enabled: boolean) {
+    neuzosConfig.globalAutoFocus = enabled;
   }
 
   // Handle fullscreen settings
@@ -404,6 +416,22 @@
           id="startup-cache-clear"
           checked={neuzosConfig.autoDeleteAllCachesOnStartup ?? false}
           onCheckedChange={handleStartupCacheToggle}
+        />
+      </div>
+    </div>
+
+    <div class="space-y-3">
+      <div class="flex items-center justify-between py-2">
+        <div class="space-y-0.5">
+          <Label for="global-auto-focus" class="text-sm font-medium">Global Auto-Focus</Label>
+          <p class="text-xs text-muted-foreground">
+            Auto-Focuses the Window where the Mouse-Cursor is pointing at.
+          </p>
+        </div>
+        <Switch
+          id="global-auto-focus"
+          checked={neuzosConfig.globalAutoFocus ?? true}
+          onCheckedChange={handleGlobalAutoFocusToggle}
         />
       </div>
     </div>
@@ -809,7 +837,7 @@
             <div class="space-y-0.5">
               <Label for="fullscreen-toggle" class="text-sm font-medium">Fullscreen Toggle</Label>
               <p class="text-xs text-muted-foreground">
-                Switch to Fullscreen Mode
+                Switch to Fullscreen Mode.
               </p>
             </div>
           </div>
@@ -828,7 +856,7 @@
             <div class="space-y-0.5">
               <Label for="keybind-toggle" class="text-sm font-medium">Keybind Toggle</Label>
               <p class="text-xs text-muted-foreground">
-                Enable/ Disable Keybinds & Switch Keybind Profiles
+                Enable/ Disable Keybinds & Switch Keybind Profiles.
               </p>
             </div>
           </div>
@@ -836,6 +864,25 @@
             id="keybind-toggle"
             checked={neuzosConfig.titleBarButtons?.keybindToggle ?? true}
             onCheckedChange={handleKeybindToggle}
+          />
+        </div>
+
+        <div class="flex items-center justify-between py-2">
+          <div class="flex items-start gap-3">
+            <div class="h-9 w-9 shrink-0 rounded-md border bg-muted/60 flex items-center justify-center">
+              <Puzzle class="h-4 w-4"/>
+            </div>
+            <div class="space-y-0.5">
+              <Label for="widgets-toggle" class="text-sm font-medium">Widgets</Label>
+              <p class="text-xs text-muted-foreground">
+                Show/ Hide the Widget Menu.
+              </p>
+            </div>
+          </div>
+          <Switch
+            id="widgets-toggle"
+            checked={neuzosConfig.titleBarButtons?.widgetsToggle ?? true}
+            onCheckedChange={handleWidgetsToggle}
           />
         </div>
       </div>

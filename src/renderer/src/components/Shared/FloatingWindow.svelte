@@ -362,7 +362,7 @@
   </div>
 
   <div
-    class="flex-1 overflow-auto {flushBottom ? 'p-0' : 'p-3'}"
+    class="floating-window-content flex-1 overflow-auto {flushBottom ? 'p-0' : 'p-3'}"
     style="display: {isMinimized ? 'none' : 'block'}; background-color: color-mix(in oklab, var(--background) {backgroundOpacity}%, transparent);"
   >
     {@render children?.()}
@@ -388,4 +388,24 @@
     <div class="absolute bottom-0 right-0 w-3 h-3 cursor-nwse-resize z-10" onmousedown={(e) => startResize('se', e)}></div>
   {/if}
 </div>
+
+<style>
+  .floating-window-content {
+    scrollbar-color: hsl(var(--border) / var(--floating-window-scrollbar-alpha)) transparent;
+  }
+
+  .floating-window-content::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  .floating-window-content::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .floating-window-content::-webkit-scrollbar-thumb {
+    background-color: hsl(var(--border) / var(--floating-window-scrollbar-alpha));
+    border-radius: 9999px;
+  }
+</style>
 

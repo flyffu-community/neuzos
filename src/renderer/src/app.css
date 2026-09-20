@@ -2,6 +2,8 @@
 
 @import "tw-animate-css";
 
+@import "./styles/indicator-effects.css";
+
 @custom-variant dark (&:is(.dark *));
 
 :root {
@@ -137,4 +139,3 @@
     scrollbar-width: none;  /* Firefox */
   }
 }
-

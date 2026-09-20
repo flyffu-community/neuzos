@@ -1,3 +1,9 @@
+import {
+  DEFAULT_INDICATOR_EFFECT_SETTINGS,
+  normalizeIndicatorEffect,
+  type IndicatorEffectSettings
+} from '$lib/indicatorEffects';
+
 type SortModeScope = 'sessionSettings' | 'layoutSettings' | 'sessionActions';
 type CollapsedGroupsScope = 'sessionSettings' | 'sessionLauncher' | 'sessionLauncherMainbar';
 type SortMode = 'arrows' | 'dragDrop';
@@ -67,7 +73,7 @@ type TodoStorage = {
 };
 
 type ActionPinsStorage = {
-  autoLoadLatest?: boolean;
+  showPins?: boolean;
   latestPins?: string[];
 };
 
@@ -87,11 +93,13 @@ type QuestlogStorage = {
 const SETTINGS_SORT_MODE_STORAGE_KEY = 'settings.sortMode';
 const SETTINGS_COLLAPSED_GROUPS_STORAGE_KEY = 'settings.collapsedGroups';
 const SETTINGS_LAYOUT_AUTO_SAVE_STORAGE_KEY = 'settings.layoutAutoSave';
+export const SETTINGS_LAYOUT_ANIMATED_BADGE_STORAGE_KEY = 'settings.layoutAnimatedBadge';
 const MINI_BROWSER_STORAGE_KEY = 'widget.miniBrowser';
 const FCOIN_CALCULATOR_STORAGE_KEY = 'widget.fcoinCalculator';
 const NOTEPAD_STORAGE_KEY = 'widget.notepad';
 const TODO_STORAGE_KEY = 'widget.todo';
 const ACTION_PINS_STORAGE_KEY = 'widget.actionPins';
+export const ACTION_PINS_VISIBILITY_CHANGED_EVENT = 'neuzos:action-pins-visibility-changed';
 const QUESTLOG_STORAGE_KEY = 'widget.questlog';
 const PANEFORGE_STORAGE_PREFIX = 'paneforge:';
 const PANEFORGE_DEFAULT_LAYOUT_TOLERANCE = 0.05;
@@ -436,7 +444,7 @@ const writeActionPinsStorage = (storage: ActionPinsStorage) => {
   if (!canUseLocalStorage()) return;
 
   const next: ActionPinsStorage = {};
-  if (storage.autoLoadLatest === true) next.autoLoadLatest = true;
+  if (storage.showPins === false) next.showPins = false;
 
   const latestPins = normalizeStringArray(storage.latestPins);
   if (latestPins.length > 0) next.latestPins = latestPins;
@@ -537,6 +545,36 @@ export const writeSettingsLayoutAutoSave = (enabled: boolean) => {
   } else {
     window.localStorage.setItem(SETTINGS_LAYOUT_AUTO_SAVE_STORAGE_KEY, 'false');
   }
+};
+
+export const readSettingsLayoutAnimatedBadge = (): IndicatorEffectSettings => {
+  const defaults = {...DEFAULT_INDICATOR_EFFECT_SETTINGS};
+  if (!canUseLocalStorage()) return defaults;
+
+  const stored = window.localStorage.getItem(SETTINGS_LAYOUT_ANIMATED_BADGE_STORAGE_KEY);
+  if (stored === null) return defaults;
+  if (stored === 'false') return {enabled: false, effect: 'effect1'};
+
+  try {
+    const parsed = JSON.parse(stored) as Partial<IndicatorEffectSettings>;
+    return {enabled: parsed.enabled !== false, effect: normalizeIndicatorEffect(parsed.effect)};
+  } catch {
+    return defaults;
+  }
+};
+
+export const writeSettingsLayoutAnimatedBadge = (settings: IndicatorEffectSettings) => {
+  if (!canUseLocalStorage()) return;
+
+  if (settings.enabled && settings.effect === 'effect1') {
+    window.localStorage.removeItem(SETTINGS_LAYOUT_ANIMATED_BADGE_STORAGE_KEY);
+    return;
+  }
+
+  const stored: Partial<IndicatorEffectSettings> = {};
+  if (!settings.enabled) stored.enabled = false;
+  if (settings.effect !== 'effect1') stored.effect = settings.effect;
+  window.localStorage.setItem(SETTINGS_LAYOUT_ANIMATED_BADGE_STORAGE_KEY, JSON.stringify(stored));
 };
 
 export const readSettingsCollapsedGroups = (
@@ -959,15 +997,6 @@ export const migrateActionPinsStorage = () => {
 
   const storage = readActionPinsStorage();
 
-  if (storage.autoLoadLatest === undefined) {
-    const legacyAutoLoad = readJsonValue(LEGACY_ACTION_PIN_AUTOLOAD_KEY);
-    if (typeof legacyAutoLoad === 'boolean') {
-      storage.autoLoadLatest = legacyAutoLoad;
-    } else if (window.localStorage.getItem(LEGACY_ACTION_PIN_AUTOLOAD_KEY) === 'true') {
-      storage.autoLoadLatest = true;
-    }
-  }
-
   if (!storage.latestPins) {
     const legacyPins = readJsonValue(LEGACY_ACTION_PIN_LATEST_PINS_KEY);
     if (Array.isArray(legacyPins)) {
@@ -980,15 +1009,18 @@ export const migrateActionPinsStorage = () => {
   writeActionPinsStorage(storage);
 };
 
-export const readActionPinsAutoLoadLatest = (): boolean => {
+export const readActionPinsVisible = (): boolean => {
   migrateActionPinsStorage();
-  return readActionPinsStorage().autoLoadLatest === true;
+  return readActionPinsStorage().showPins !== false;
 };
 
-export const writeActionPinsAutoLoadLatest = (autoLoadLatest: boolean) => {
+export const writeActionPinsVisible = (visible: boolean) => {
   const storage = readActionPinsStorage();
-  storage.autoLoadLatest = autoLoadLatest;
+  storage.showPins = visible;
   writeActionPinsStorage(storage);
+  if (canUseLocalStorage()) {
+    window.dispatchEvent(new CustomEvent(ACTION_PINS_VISIBILITY_CHANGED_EVENT));
+  }
 };
 
 export const readActionPinsLatestPins = (): string[] => {

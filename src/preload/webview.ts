@@ -8,6 +8,21 @@ document.addEventListener('keydown', (e) => {
   ipcRenderer.sendToHost('keydown', e.key);
 }, true);
 
+let hoverReported = false;
+const reportSessionHover = () => {
+  if (hoverReported) return;
+  hoverReported = true;
+  ipcRenderer.sendToHost('sessionhover');
+};
+
+document.addEventListener('mousemove', reportSessionHover, true);
+document.addEventListener('mouseleave', () => {
+  hoverReported = false;
+}, true);
+window.addEventListener('blur', () => {
+  hoverReported = false;
+});
+
 const mouseBindButtonMap: Record<number, string> = {
   1: 'middle',
   3: 'mouse4',
@@ -21,6 +36,11 @@ function suppressMouseBindDefault(event: MouseEvent): void {
 }
 
 document.addEventListener('mousedown', (event) => {
+  if (event.button === 0) {
+    ipcRenderer.sendToHost('sessionfocus');
+    return;
+  }
+
   const key = mouseBindButtonMap[event.button];
   if (!key) return;
 

@@ -12,12 +12,22 @@
   } from '$lib/widgetLauncherPins';
   import type { ViewerWindowType } from '$lib/types';
 
+  let {
+    onHasPinnedLaunchersChange = () => {}
+  }: {
+    onHasPinnedLaunchersChange?: (hasPinnedLaunchers: boolean) => void;
+  } = $props();
+
   const widgetsContext = getWidgetsContext();
   const questPanel = getQuestPanelContext();
   const neuzosBridge = getNeuzosBridgeContext();
 
   let pinnedLaunchers = $state<WidgetLauncherId[]>([]);
   let openViewerTypes = $state<ViewerWindowType[]>([]);
+
+  $effect(() => {
+    onHasPinnedLaunchersChange(pinnedLaunchers.length > 0);
+  });
 
   function refreshPinnedLaunchers() {
     pinnedLaunchers = readPinnedWidgetLaunchers();

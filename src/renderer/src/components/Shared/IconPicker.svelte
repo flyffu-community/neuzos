@@ -73,6 +73,7 @@
     'Party Skills',
     'Couple Skills',
     'Skills / Actions / Motions',
+    'Pets',
     'Items / Consumables'
   ];
 
@@ -93,15 +94,27 @@
     'motions/attack': 'Attack',
     'motions/cheer': 'Cheer',
     'motions/follow': 'Follow',
-    'motions/petgrace': 'Petgrace',
+    'motions/petgrace': 'Pet Grace',
     'motions/swap_skillpage': 'Swap Skillpage',
     'motions/swap_statpage': 'Swap Statpage',
+    'pets/pet_angel': 'Angel',
+    'pets/pet_crab': 'Crab',
+    'pets/pet_dragon': 'Dragon',
+    'pets/pet_fox': 'Fox',
+    'pets/pet_griffin': 'Griffin',
+    'pets/pet_lion': 'Lion',
+    'pets/pet_rabbit': 'Rabbit',
+    'pets/pet_tiger': 'Tiger',
+    'pets/pet_unicorn': 'Unicorn',
+    'pets/pet_whitelion': 'White Lion',
+    'pets/pet_draco': 'Draco',
     'items/nitro_boost': 'Nitro Boost',
     'items/eq_switch': 'EQ Switch',
     'items/food_sushi': 'Food',
     'items/pill_gold': 'Pill',
-    'items/vital_fp': 'Vital FP',
-    'items/refresher_mp': 'Refresher MP',
+    'items/vital_fp': 'FP Vitaldrink',
+    'items/refresher_mp': 'MP Refresher',
+    'items/antidote_potion': 'Antidote Potion',
     'items/wings': 'Flying Mount'
   };
 
@@ -145,6 +158,10 @@
 
     if (iconSlug.startsWith('items/')) {
       return 'Items / Consumables';
+    }
+
+    if (iconSlug.startsWith('pets/')) {
+      return 'Pets';
     }
 
     if (prefix === 'pt') {

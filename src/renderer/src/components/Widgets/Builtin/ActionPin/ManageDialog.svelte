@@ -1,12 +1,16 @@
 <script lang="ts">
   import {getContext, onMount} from 'svelte';
-  import {ChevronDown} from '@lucide/svelte';
+  import {ChevronDown, Info} from '@lucide/svelte';
   import {Checkbox} from '$lib/components/ui/checkbox';
   import * as Dialog from '$lib/components/ui/dialog';
   import {Switch} from '$lib/components/ui/switch';
   import {getWidgetsContext} from '$lib/contexts/widgetsContext.svelte';
   import {neuzosBridge} from '$lib/core';
-  import {readActionPinsAutoLoadLatest, writeActionPinsAutoLoadLatest} from '$lib/localStorageStores';
+  import {
+    ACTION_PINS_VISIBILITY_CHANGED_EVENT,
+    readActionPinsVisible,
+    writeActionPinsVisible
+  } from '$lib/localStorageStores';
   import type {MainWindowState} from '$lib/types';
 
   type Props = {
@@ -19,8 +23,8 @@
   const mainWindowState = getContext<MainWindowState>('mainWindowState');
   const widgetsContext = getWidgetsContext();
 
-  let autoLoadLatestPins = $state(false);
-  let didInitAutoLoadPreference = false;
+  let showActionPins = $state(true);
+  let didInitVisibilityPreference = $state(false);
   let didInitExpandedSessions = false;
   let expandedSessionIds = $state<string[]>([]);
 
@@ -76,13 +80,24 @@
   }
 
   onMount(() => {
-    autoLoadLatestPins = readActionPinsAutoLoadLatest();
-    didInitAutoLoadPreference = true;
+    const refreshVisibility = () => {
+      showActionPins = readActionPinsVisible();
+    };
+
+    refreshVisibility();
+    didInitVisibilityPreference = true;
+    window.addEventListener(ACTION_PINS_VISIBILITY_CHANGED_EVENT, refreshVisibility);
+    window.addEventListener('storage', refreshVisibility);
+
+    return () => {
+      window.removeEventListener(ACTION_PINS_VISIBILITY_CHANGED_EVENT, refreshVisibility);
+      window.removeEventListener('storage', refreshVisibility);
+    };
   });
 
   $effect(() => {
-    if (!didInitAutoLoadPreference) return;
-    writeActionPinsAutoLoadLatest(autoLoadLatestPins);
+    if (!didInitVisibilityPreference) return;
+    writeActionPinsVisible(showActionPins);
   });
 </script>
 
@@ -95,12 +110,18 @@
       </Dialog.Description>
     </Dialog.Header>
 
-    <div class="flex items-center justify-between gap-4 rounded-md border p-3">
-      <div class="min-w-0 space-y-1">
-        <div class="text-sm font-medium">Save Action Pins</div>
-        <p class="text-xs text-muted-foreground">Pinned Actions persist after restarting NeuzOS</p>
+    <div class="space-y-3 rounded-md border p-3">
+      <div class="flex items-center justify-between gap-4">
+        <div class="min-w-0 space-y-1">
+          <div class="text-sm font-medium">Show Action Pins</div>
+          <p class="text-xs text-muted-foreground">Show Enabled Action Pins in the Mainbar</p>
+        </div>
+        <Switch bind:checked={showActionPins} />
       </div>
-      <Switch bind:checked={autoLoadLatestPins} />
+      <div class="flex items-center gap-2 rounded-md border px-3 py-2 text-xs text-muted-foreground">
+        <Info class="size-4 shrink-0" />
+        <span>Double Click on the Pinned Session Icon to Open its Action Pad</span>
+      </div>
     </div>
 
     <div class="max-h-[min(28rem,55vh)] overflow-y-auto rounded-md border">
@@ -124,7 +145,6 @@
               <Checkbox
                 class="mr-3"
                 checked={isSessionPinned(sessionInfo.id)}
-                disabled={!isSessionPinned(sessionInfo.id) && !sessionInfo.actions.some(action => action.pinned)}
                 onCheckedChange={(checked) => setSessionPinned(sessionInfo.id, checked)}
                 aria-label="Pin {sessionInfo.label} Actions to the Mainbar"
               />

@@ -26,7 +26,6 @@
   {@render children?.()}
 
   {#if windowContext.isResizing || windowContext.isDragging}
-    <div class="fixed inset-0 bg-gray-500/20 dark:bg-gray-900/40 z-[999] pointer-events-auto"></div>
+    <div class="fixed inset-0 z-[999] pointer-events-auto"></div>
   {/if}
 </div>
-

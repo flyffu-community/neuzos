@@ -1,10 +1,12 @@
 <script lang="ts">
-  import {getContext} from 'svelte';
-  import {Settings, Swords, X} from '@lucide/svelte';
-  import {Button} from '$lib/components/ui/button';
+  import {onMount} from 'svelte';
+  import {Check, Eye, Settings, Swords} from '@lucide/svelte';
   import * as DropdownMenu from '$lib/components/ui/dropdown-menu';
-  import {getWidgetsContext} from '$lib/contexts/widgetsContext.svelte';
-  import type {MainWindowState} from '$lib/types';
+  import {
+    ACTION_PINS_VISIBILITY_CHANGED_EVENT,
+    readActionPinsVisible,
+    writeActionPinsVisible
+  } from '$lib/localStorageStores';
 
   type Props = {
     onManagePins?: () => void;
@@ -12,41 +14,27 @@
 
   let {onManagePins}: Props = $props();
 
-  const ACTION_PIN_WIDGET_TYPE = 'widget.builtin.action_pin';
-  const widgetsContext = getWidgetsContext();
-  const mainWindowState = getContext<MainWindowState>('mainWindowState');
+  let showActionPins = $state(true);
 
-  const managedSessionActions = $derived(
-    (mainWindowState.config.sessionActions ?? []).map(sessionActions => {
-      const session = mainWindowState.config.sessions.find(candidate => candidate.id === sessionActions.sessionId);
-      return {
-        id: sessionActions.sessionId,
-        label: session?.label || 'Unknown Session',
-        icon: session?.icon?.slug || 'misc/browser',
-        actions: sessionActions.actions ?? []
-      };
-    })
-  );
+  function toggleActionPinsVisibility() {
+    showActionPins = !showActionPins;
+    writeActionPinsVisible(showActionPins);
+  }
 
-  const allSessionsWithPinnedActions = $derived(
-    managedSessionActions
-      .map(sessionInfo => ({
-        id: sessionInfo.id,
-        label: sessionInfo.label,
-        icon: sessionInfo.icon,
-        actionsCount: sessionInfo.actions.filter(action => action.pinned).length
-      }))
-      .filter(sessionInfo => sessionInfo.actionsCount > 0)
-  );
+  onMount(() => {
+    const refreshVisibility = () => {
+      showActionPins = readActionPinsVisible();
+    };
 
-  const widgets = $derived(widgetsContext.getWidgetsByType(ACTION_PIN_WIDGET_TYPE));
+    refreshVisibility();
+    window.addEventListener(ACTION_PINS_VISIBILITY_CHANGED_EVENT, refreshVisibility);
+    window.addEventListener('storage', refreshVisibility);
 
-  const availableSessionsForActionPin = $derived(
-    allSessionsWithPinnedActions.filter(sessionInfo => {
-      const existingPin = widgets.find(widget => widget.data?.sessionId === sessionInfo.id);
-      return !existingPin;
-    })
-  );
+    return () => {
+      window.removeEventListener(ACTION_PINS_VISIBILITY_CHANGED_EVENT, refreshVisibility);
+      window.removeEventListener('storage', refreshVisibility);
+    };
+  });
 </script>
 
 <DropdownMenu.Sub>
@@ -59,41 +47,16 @@
       <Settings class="mr-2 size-4" />
       <span>Manage Pins</span>
     </DropdownMenu.Item>
-    {#if availableSessionsForActionPin.length > 0}
-      <DropdownMenu.Separator />
-      {#each availableSessionsForActionPin as sessionInfo}
-        <DropdownMenu.Item
-          onSelect={(event) => event.preventDefault()}
-          onclick={() => widgetsContext.createWidget(ACTION_PIN_WIDGET_TYPE, {sessionId: sessionInfo.id})}
-        >
-          <img class="mr-2 size-4" src="icons/{sessionInfo.icon}.png" alt="" />
-          <span>{sessionInfo.label}</span>
-          <span class="ml-auto text-[10px] opacity-50">({sessionInfo.actionsCount})</span>
-        </DropdownMenu.Item>
-      {/each}
-    {/if}
-
-    {#if widgets.length > 0}
-      <DropdownMenu.Separator />
-      <DropdownMenu.Label class="text-xs">Active Action Pins ({widgets.length})</DropdownMenu.Label>
-      {#each widgets as widget}
-        {@const sessionInfo = managedSessionActions.find(session => session.id === widget.data?.sessionId)}
-        <div class="flex items-center justify-between gap-2 px-2 py-1.5 text-sm">
-          <div class="flex min-w-0 items-center gap-2">
-            <img class="size-4" src="icons/{sessionInfo?.icon || 'misc/browser'}.png" alt="" />
-            <span class="truncate text-xs">{sessionInfo?.label || 'Unknown Session'}</span>
-          </div>
-          <Button
-            size="icon"
-            variant="ghost"
-            class="size-6 hover:bg-destructive hover:text-destructive-foreground"
-            onclick={() => widgetsContext.destroyWidget(widget.id)}
-            title="Close"
-          >
-            <X class="size-3" />
-          </Button>
-        </div>
-      {/each}
-    {/if}
+    <DropdownMenu.Separator />
+    <DropdownMenu.Item
+      onSelect={(event) => event.preventDefault()}
+      onclick={toggleActionPinsVisibility}
+    >
+      <Eye class="mr-2 size-4" />
+      <span>Show Pins</span>
+      {#if showActionPins}
+        <Check class="ml-auto size-4" />
+      {/if}
+    </DropdownMenu.Item>
   </DropdownMenu.SubContent>
 </DropdownMenu.Sub>

@@ -45,9 +45,11 @@
     titleBarButtons: {
       darkModeToggle: false,
       fullscreenToggle: true,
-      keybindToggle: true
+      keybindToggle: true,
+      widgetsToggle: true
     },
     autoSaveSettings: false,
+    globalAutoFocus: true,
     fullscreen: {
       hideTitleBarInMainWindow: true,
       hideTitleBarInSessionLayouts: true
@@ -101,6 +103,7 @@
     neuzosConfig.titleBarButtons = conf.titleBarButtons;
     neuzosConfig.window = conf.window;
     neuzosConfig.autoSaveSettings = conf.autoSaveSettings ?? false;
+    neuzosConfig.globalAutoFocus = conf.globalAutoFocus ?? true;
     neuzosConfig.fullscreen = conf.fullscreen ?? {
       hideTitleBarInMainWindow: true,
       hideTitleBarInSessionLayouts: true
