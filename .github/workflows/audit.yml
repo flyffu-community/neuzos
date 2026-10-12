@@ -1,0 +1,87 @@
+name: Dependency audit
+
+on: pull_request
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out Git repository
+        uses: actions/checkout@v7
+
+      - name: Setup Bun ⚙️
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      # bun audit reads bun.lock directly, no install needed.
+      # It exits 1 when vulnerabilities are found; the next step reports them instead of failing here.
+      - name: Run bun audit
+        run: bun audit --json > bun-audit.json || true
+
+      - name: Comment audit results on PR
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- bun-audit -->';
+            const order = ['critical', 'high', 'moderate', 'low'];
+            const icons = { critical: '🟣', high: '🔴', moderate: '🟠', low: '🟡' };
+            const cell = (s) => String(s ?? '').replace(/\|/g, '\\|').replace(/\r?\n/g, ' ');
+
+            let report;
+            try {
+              report = JSON.parse(fs.readFileSync('bun-audit.json', 'utf8'));
+            } catch (error) {
+              core.setFailed(`bun audit did not produce valid JSON (see the "Run bun audit" step log): ${error.message}`);
+              return;
+            }
+
+            const rows = Object.entries(report)
+              .flatMap(([pkg, advisories]) => advisories.map((a) => ({ pkg, ...a })))
+              .sort((a, b) => order.indexOf(a.severity) - order.indexOf(b.severity) || a.pkg.localeCompare(b.pkg));
+
+            const header = '### 🔒 bun audit\n\n';
+            let summary, body;
+            if (rows.length === 0) {
+              summary = body = `${header}✅ No known vulnerabilities found.\n`;
+            } else {
+              const counts = order
+                .map((s) => [s, rows.filter((r) => r.severity === s).length])
+                .filter(([, n]) => n > 0)
+                .map(([s, n]) => `${n} ${s}`);
+              const intro = `${header}**${rows.length} ${rows.length === 1 ? 'vulnerability' : 'vulnerabilities'}** (${counts.join(', ')})\n\n`
+                + '| Severity | Package | Vulnerable versions | Advisory |\n|---|---|---|---|\n';
+              const table = rows
+                .map((r) => `| ${icons[r.severity] ?? ''} ${r.severity} | \`${cell(r.pkg)}\` | \`${cell(r.vulnerable_versions)}\` | [${cell(r.title)}](${r.url}) |`)
+                .join('\n');
+              const footer = '\n\nRun `bun audit` locally for details. Advisories in indirect dependencies are usually fixed by regenerating the lockfile (`rm bun.lock && bun install`); `bun update` only updates direct dependencies.\n';
+              summary = intro + table + footer;
+              // GitHub comments are limited to 65536 characters; the job summary keeps the full table.
+              body = table.length > 60000
+                ? `${intro}${table.slice(0, table.lastIndexOf('\n', 60000))}\n\n_…truncated, see the job summary for the full list._${footer}`
+                : summary;
+            }
+            body = `${marker}\n${body}`;
+
+            await core.summary.addRaw(summary).write();
+
+            try {
+              const { owner, repo } = context.repo;
+              const issue_number = context.payload.pull_request.number;
+              const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
+              const existing = comments.find((c) => c.user?.type === 'Bot' && c.body?.startsWith(marker));
+              if (existing) {
+                await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+              } else {
+                await github.rest.issues.createComment({ owner, repo, issue_number, body });
+              }
+            } catch (error) {
+              // Pull requests from forks get a read-only token; the job summary still has the results.
+              core.warning(`Could not post PR comment: ${error.message}`);
+            }

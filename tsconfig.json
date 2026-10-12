@@ -9,6 +9,9 @@
     }
   ],
   "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "skipLibCheck": true,
     "paths": {
       "$lib": ["./src/renderer/src/lib"],
       "$lib/*": ["./src/renderer/src/lib/*"]
